@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes Agent 迁移与同步指南 — 九龙议会</title>
+<style>
+  :root {
+    --ivory:#FAF9F5;--paper:#FFFFFF;--slate:#141413;--clay:#D97757;--clay-d:#B85C3E;
+    --oat:#E3DACC;--olive:#788C5D;--g100:#F0EEE6;--g200:#E6E3DA;--g300:#D1CFC5;
+    --g500:#87867F;--g700:#3D3D3A;
+    --serif:ui-serif,Georgia,"Times New Roman",Times,serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Monaco,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ivory);color:var(--slate);font-family:var(--sans);line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding:0 28px 120px}
+  header.masthead{padding:64px 0 44px;border-bottom:1.5px solid var(--g300);margin-bottom:12px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--g500);margin-bottom:14px;display:flex;align-items:center;gap:10px}
+  .eyebrow::before{content:"";width:20px;height:1.5px;background:var(--clay)}
+  h1{font-family:var(--serif);font-weight:500;font-size:clamp(30px,4.2vw,46px);line-height:1.08;letter-spacing:-.016em;margin:0 0 6px}
+  h1 em{font-style:italic;color:var(--clay)}
+  .intro{font-size:15px;color:var(--g700);max-width:600px;margin:16px 0 0}
+  .meta{font-family:var(--mono);font-size:10px;color:var(--g500);margin-top:18px;display:flex;gap:20px;flex-wrap:wrap}
+
+  section{margin-top:56px;scroll-margin-top:24px}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:8px}
+  .sec-head .idx{font-family:var(--mono);font-size:13px;color:var(--clay);font-weight:600;width:28px;flex-shrink:0}
+  .sec-head h2{font-family:var(--serif);font-weight:500;font-size:24px;margin:0;letter-spacing:-.012em}
+  .sec-intro{font-size:13.5px;color:var(--g700);max-width:620px;margin:0 0 20px 42px}
+
+  .step{display:flex;gap:18px;margin:20px 0;padding:20px 24px;background:var(--paper);border:1.5px solid var(--g200);border-radius:12px}
+  .step-num{width:36px;height:36px;border-radius:50%;background:var(--clay);color:white;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:14px;font-weight:700;flex-shrink:0}
+  .step-body{flex:1}
+  .step-body h3{font-family:var(--serif);font-size:17px;margin:0 0 6px}
+  .step-body p{font-size:13px;color:var(--g700);margin:0 0 8px}
+  .step-body .who{font-family:var(--mono);font-size:10px;color:var(--clay);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+
+  pre{background:var(--slate);color:var(--ivory);padding:16px 20px;border-radius:8px;overflow-x:auto;font-size:13px;line-height:1.6;margin:8px 0}
+  pre code{background:none;padding:0;color:inherit;font-family:var(--mono)}
+  code{font-family:var(--mono);font-size:.88em;background:var(--g100);padding:2px 5px;border-radius:4px}
+
+  .note{background:var(--g100);border:1.5px solid var(--g200);border-radius:8px;padding:14px 18px;margin:14px 0;font-size:13px;color:var(--g700)}
+  .note.warn{background:#FFF5F5;border-color:#FECACA;color:#991B1B}
+  .note strong{color:var(--clay)}
+  .note.warn strong{color:#991B1B}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;margin:12px 0}
+  thead th{text-align:left;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--g500);padding:0 0 8px;border-bottom:1.5px solid var(--g300)}
+  tbody td{padding:9px 0;border-bottom:1px solid var(--g200);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+
+  .flow-diagram{overflow-x:auto;padding:16px 0;text-align:center}
+  .flow-diagram svg{max-width:100%}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin:16px 0}
+  .card{background:var(--paper);border:1.5px solid var(--g200);border-radius:10px;padding:18px}
+  .card h4{font-family:var(--serif);font-size:15px;margin:0 0 6px}
+  .card p{font-size:12px;color:var(--g700);margin:0}
+
+  footer{margin-top:72px;border-top:1.5px solid var(--g300);padding-top:24px;display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:14px;font-size:11px;color:var(--g500)}
+  footer .k{font-family:var(--serif);font-style:italic;color:var(--g700);font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <div class="eyebrow">Hermes Agent · 迁移与同步 · 2026-05-15</div>
+  <h1>九龙议会 <em>搬家</em>指南</h1>
+  <p class="intro">
+    把一台机器上的 Hermes Agent（含全部9位议会成员、技能、记忆）
+    完整迁移到另一台电脑。含双机同步策略。零基础可操作。
+  </p>
+  <div class="meta">
+    <span>🏛 9 profiles</span><span>📦 2.9MB</span><span>🔄 git sync</span><span>⏱ ~15 min</span>
+  </div>
+</header>
+
+<!-- ── Overview Diagram ── -->
+<div class="flow-diagram">
+  <svg viewBox="0 0 900 280" style="max-width:900px;">
+    <defs>
+      <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="#D97757"/></marker>
+      <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="#788C5D"/></marker>
+    </defs>
+    <!-- Source machine -->
+    <rect x="20" y="60" width="200" height="100" rx="12" fill="#FFFFFF" stroke="#141413" stroke-width="2.5"/>
+    <text x="120" y="95" text-anchor="middle" font-family="system-ui" font-size="15" font-weight="600" fill="#141413">🖥 源机器 (VM)</text>
+    <text x="120" y="115" text-anchor="middle" font-family="monospace" font-size="10" fill="#87867F">profiles + skills + memories</text>
+    <text x="120" y="135" text-anchor="middle" font-family="monospace" font-size="10" fill="#D97757">hermes-migration.tar.gz</text>
+    <!-- SCP arrow -->
+    <line x1="220" y1="95" x2="340" y2="95" stroke="#D97757" stroke-width="2.5" marker-end="url(#a)"/>
+    <!-- Middle step -->
+    <rect x="350" y="75" width="180" height="70" rx="10" fill="#E3DACC" stroke="#D97757" stroke-width="2"/>
+    <text x="440" y="105" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#141413">📦 SCP / Google Drive</text>
+    <text x="440" y="125" text-anchor="middle" font-family="monospace" font-size="10" fill="#87867F">一次性传输</text>
+    <!-- SCP arrow to dest -->
+    <line x1="530" y1="95" x2="650" y2="95" stroke="#D97757" stroke-width="2.5" marker-end="url(#a)"/>
+    <!-- Dest machine -->
+    <rect x="660" y="60" width="220" height="100" rx="12" fill="#FFFFFF" stroke="#141413" stroke-width="2.5"/>
+    <text x="770" y="95" text-anchor="middle" font-family="system-ui" font-size="15" font-weight="600" fill="#141413">💻 新机器</text>
+    <text x="770" y="115" text-anchor="middle" font-family="monospace" font-size="10" fill="#87867F">tar xzf → hermes → 9 profiles</text>
+    <text x="770" y="135" text-anchor="middle" font-family="monospace" font-size="10" fill="#788C5D">✓ 迁移完成</text>
+    <!-- Git sync arrows (bottom) -->
+    <rect x="230" y="190" width="440" height="50" rx="10" fill="#F0EEE6" stroke="#788C5D" stroke-width="2" stroke-dasharray="6 3"/>
+    <text x="450" y="210" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#141413">🔄 日常同步：git push / git pull</text>
+    <text x="450" y="228" text-anchor="middle" font-family="monospace" font-size="10" fill="#87867F">github.com/jianfjin/hermes-skills</text>
+    <!-- Curved arrows for git -->
+    <path d="M330,240 C330,270 570,270 570,240" fill="none" stroke="#788C5D" stroke-width="1.5" marker-end="url(#ag)" stroke-dasharray="4 3"/>
+    <path d="M570,195 C570,165 330,165 330,195" fill="none" stroke="#788C5D" stroke-width="1.5" marker-end="url(#ag)" stroke-dasharray="4 3"/>
+  </svg>
+</div>
+
+<!-- ================================================================ -->
+<section id="part1">
+  <div class="sec-head"><span class="idx">01</span><h2>Part 1：一次性迁移</h2></div>
+  <p class="sec-intro">把源机器上的所有 Hermes 配置打包，传输到新机器。只需做一次。</p>
+
+  <!-- Step 1 -->
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <div class="who">在源机器上执行 · 1分钟</div>
+      <h3>打包 Hermes 配置</h3>
+      <p>把 profiles、skills、scripts、memories 打包成一个 tar.gz 文件。</p>
+      <pre><code>tar czf /tmp/hermes-migration-$(date +%Y%m%d).tar.gz \
+  -C ~/ \
+  .hermes/config.yaml \
+  .hermes/profiles/*/config.yaml \
+  .hermes/profiles/*/SOUL.md \
+  .hermes/skills/ \
+  .hermes/scripts/ \
+  .hermes/memories/</code></pre>
+      <p>你会得到一个约 <strong>3MB</strong> 的文件：<code>/tmp/hermes-migration-20260515.tar.gz</code></p>
+    </div>
+  </div>
+
+  <!-- Step 2 -->
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <div class="who">在任何电脑上执行 · 2分钟</div>
+      <h3>传输迁移包</h3>
+      <p><strong>方式 A — SCP 直传（推荐）：</strong></p>
+      <pre><code># 在新机器上执行（或在源机器上反过来 scp 推过去）
+scp user@&lt;源机器IP&gt;:/tmp/hermes-migration-20260515.tar.gz ~/</code></pre>
+      <p><strong>方式 B — Google Drive 中转：</strong></p>
+      <p>从源机器下载 → 浏览器上传到 <a href="https://drive.google.com/drive/folders/1TwvnoXepFkXk5H9RkKEEC05oHEtzKIxu">Google Drive 文件夹</a> → 新机器下载。</p>
+    </div>
+  </div>
+
+  <!-- Step 3 -->
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <div class="who">在新机器上执行 · 3分钟</div>
+      <h3>解压并安装 Hermes</h3>
+      <pre><code># 解压配置到用户目录
+tar xzf ~/hermes-migration-20260515.tar.gz -C ~/
+
+# 安装 Hermes Agent（如果还没装）
+curl -sSL https://hermes-agent.nousresearch.com/install.sh | bash</code></pre>
+    </div>
+  </div>
+
+  <!-- Step 4 -->
+  <div class="step">
+    <div class="step-num">4</div>
+    <div class="step-body">
+      <div class="who">在新机器上执行 · 5分钟</div>
+      <h3>重建8个议会 Profile</h3>
+      <p>Hermes 需要正式注册每个 profile。先用 <code>--clone-from default</code> 创建，再覆盖配置文件。</p>
+      <pre><code># 创建8个profile
+for p in musk xuefeng linus xiaolong steve guido dijkstra jensen; do
+  hermes profile create $p --clone-from default
+done
+
+# 用迁移包里的 config.yaml 和 SOUL.md 覆盖
+# （tar xzf 已经把它们放在 ~/.hermes/profiles/*/ 下了）
+# 如果有冲突，手动覆盖：
+# cp ~/.hermes/profiles/musk/config.yaml ~/.hermes/profiles/musk/
+# cp ~/.hermes/profiles/musk/SOUL.md ~/.hermes/profiles/musk/</code></pre>
+    </div>
+  </div>
+
+  <!-- Step 5 -->
+  <div class="step">
+    <div class="step-num">5</div>
+    <div class="step-body">
+      <div class="who">在新机器上执行 · 2分钟</div>
+      <h3>克隆 Skills Git 仓库</h3>
+      <p>Skills 已托管在 GitHub。直接用 git clone 覆盖解压的版本（保证最新）。</p>
+      <pre><code>rm -rf ~/.hermes/skills
+git clone git@github.com:jianfjin/hermes-skills.git ~/.hermes/skills</code></pre>
+    </div>
+  </div>
+
+  <!-- Step 6 -->
+  <div class="step">
+    <div class="step-num">6</div>
+    <div class="step-body">
+      <div class="who">在新机器上执行 · 2分钟</div>
+      <h3>配置 API 密钥</h3>
+      <p>迁移包里的 <code>config.yaml</code> 可能包含旧密钥。在新机器上重新设置：</p>
+      <pre><code># 主配置
+hermes config set model.provider deepseek
+# （浏览器打开 hermes setup 或手动编辑 ~/.hermes/config.yaml）
+
+# 每个 profile（如果密钥不同）
+musk config set model.provider kimi-coding-cn
+musk config set model.context_length 65536
+musk config set auxiliary.compression.context_length 65536
+# ... 以此类推</code></pre>
+      <div class="note warn"><strong>⚠ 安全警告：</strong> 迁移包包含 API 密钥。不要上传到公开位置。传输完成后从 <code>/tmp/</code> 删除。</div>
+    </div>
+  </div>
+
+  <!-- Step 7 -->
+  <div class="step">
+    <div class="step-num">7</div>
+    <div class="step-body">
+      <div class="who">验证 · 1分钟</div>
+      <h3>烟测——让每位议员开口说话</h3>
+      <pre><code># 测试5位英语议员
+musk chat -q "Who are you? One sentence."
+steve chat -q "Who are you?"
+linus chat -q "Who are you?"
+guido chat -q "Who are you?"
+dijkstra chat -q "Who are you?"
+
+# 测试3位中文议员
+xuefeng chat -q "你是谁？一句话。"
+xiaolong chat -q "你是谁？"
+jensen chat -q "你是谁？"</code></pre>
+      <p>预期：每位议员以正确的语言和角色风格回复。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="part2">
+  <div class="sec-head"><span class="idx">02</span><h2>Part 2：日常双机同步</h2></div>
+  <p class="sec-intro">迁移后，两台机器各自使用 Hermes。Skills 和 SOUL.md 通过 Git 保持同步。</p>
+
+  <div class="cards">
+    <div class="card">
+      <h4>📋 Skills</h4>
+      <p>托管在 <code>github.com/jianfjin/hermes-skills</code><br>
+      机器A改了skill → <code>git push</code><br>
+      机器B → <code>git pull</code></p>
+    </div>
+    <div class="card">
+      <h4>🧠 SOUL.md</h4>
+      <p>托管在 <code>github.com/jianfjin/scailed_wp4</code><br>
+      改了SOUL → 复制到 scailed_wp4/council_profiles/<br>
+      另一台从 scailed_wp4 拉取覆盖</p>
+    </div>
+    <div class="card">
+      <h4>🔑 API密钥</h4>
+      <p><strong>不进 Git。</strong><br>
+      两台机器各自配置。<br>
+      改密钥时手动同步。</p>
+    </div>
+    <div class="card">
+      <h4>💾 Memory</h4>
+      <p>每台机器独立积累记忆。<br>
+      如需同步，用 tar 包定期传输<br>
+      <code>~/.hermes/memories/</code> 目录。</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">A</div>
+    <div class="step-body">
+      <h3>同步 Skills（最常用）</h3>
+      <pre><code># 机器A：修改了skill后
+cd ~/.hermes/skills
+git add -A
+git commit -m "Update ontology-patterns: add new pattern"
+git push
+
+# 机器B：拉取更新
+cd ~/.hermes/skills
+git pull</code></pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">B</div>
+    <div class="step-body">
+      <h3>同步 SOUL.md（改议会人格时）</h3>
+      <pre><code># 机器A：改了Musk的灵魂
+vim ~/.hermes/profiles/musk/SOUL.md
+
+# 备份到 scailed_wp4
+cp ~/.hermes/profiles/musk/SOUL.md \
+   ~/projects/scailed_wp4/council_profiles/musk_SOUL.md
+
+cd ~/projects/scailed_wp4
+git add council_profiles/ && git commit -m "Update Musk SOUL" && git push
+
+# 机器B：拉取覆盖
+cd ~/projects/scailed_wp4 && git pull
+cp council_profiles/musk_SOUL.md ~/.hermes/profiles/musk/SOUL.md</code></pre>
+    </div>
+  </div>
+
+  <div class="note"><strong>💡 提示：</strong>可以写一个 cron job 每小时自动 <code>git pull</code>，实现自动同步。</div>
+</section>
+
+<!-- ================================================================ -->
+<section id="part3">
+  <div class="sec-head"><span class="idx">03</span><h2>Part 3：常见问题</h2></div>
+
+  <table>
+    <thead><tr><th width="35%">问题</th><th>解决</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Profile 报错 "Model has context window 32,768"</strong></td><td>kimi-k2.6 需要手动设置 context_length。运行：<br><code>musk config set model.context_length 65536</code><br><code>musk config set auxiliary.compression.context_length 65536</code></td></tr>
+      <tr><td><strong>Profile 报错 HTTP 401</strong></td><td>clone 来的 profile 可能保留了旧 base_url。编辑 <code>~/.hermes/profiles/&lt;name&gt;/config.yaml</code>，删除 <code>base_url</code> 行。</td></tr>
+      <tr><td><strong>Skill 修改后在另一台没生效</strong></td><td>检查是否 <code>git push</code> 了。另一台需要 <code>git pull</code>。Skills 没有自动重载。</td></tr>
+      <tr><td><strong>tar 包解压后文件权限不对</strong></td><td>运行 <code>chmod -R u+rw ~/.hermes/</code></td></tr>
+      <tr><td><strong>迁移后记忆丢失</strong></td><td>检查 <code>~/.hermes/memories/</code> 是否在 tar 包里。可以用 <code>tar tzf hermes-migration-20260515.tar.gz | grep memories</code> 验证。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ================================================================ -->
+<section id="part4">
+  <div class="sec-head"><span class="idx">04</span><h2>Part 4：完整命令速查</h2></div>
+
+  <div class="note"><strong>🔴 迁移（从源机器到新机器）：</strong></div>
+  <pre><code># === 源机器 ===
+tar czf /tmp/hermes-migration.tar.gz -C ~/ \
+  .hermes/config.yaml .hermes/profiles/*/config.yaml \
+  .hermes/profiles/*/SOUL.md .hermes/skills/ \
+  .hermes/scripts/ .hermes/memories/
+
+scp /tmp/hermes-migration.tar.gz user@new-host:~/
+
+# === 新机器 ===
+tar xzf ~/hermes-migration.tar.gz -C ~/
+curl -sSL https://hermes-agent.nousresearch.com/install.sh | bash
+
+for p in musk xuefeng linus xiaolong steve guido dijkstra jensen; do
+  hermes profile create $p --clone-from default
+done
+
+git clone git@github.com:jianfjin/hermes-skills.git ~/.hermes/skills</code></pre>
+
+  <div class="note"><strong>🟢 日常同步：</strong></div>
+  <pre><code># Skills
+cd ~/.hermes/skills && git pull   # 拉取
+cd ~/.hermes/skills && git add -A && git commit -m "..." && git push  # 推送
+
+# SOUL.md
+cp ~/.hermes/profiles/musk/SOUL.md ~/projects/scailed_wp4/council_profiles/musk_SOUL.md
+cd ~/projects/scailed_wp4 && git add council_profiles/ && git commit -m "..." && git push</code></pre>
+</section>
+
+<footer>
+  <div class="k">DataWego · 九龙议会</div>
+  <div>2026-05-15 · hermes-skills · 迁移与同步指南</div>
+</footer>
+</div>
+</body>
+</html>
