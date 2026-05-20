@@ -19,10 +19,10 @@ Tested between:
 │  LOCAL (jin-X555LAB)    │          │  VM (34.57.82.51)       │
 │                         │          │                         │
 │  hermes gateway :8642   │          │  hermes gateway :8642   │
-│  webhook server :8644   │          │  webhook server :8644   │
+│  webhook server :8647   │          │  webhook server :8644   │
 │                         │          │                         │
 │  SSH -L 8643:local:8642 │──ssh──→  │  :8642 ← local reaches  │
-│  SSH -R 8645:local:8644 │──ssh──→  │  :8645 → VM reaches     │
+│  SSH -R 8647:local:8647 │──ssh──→  │  :8647 → VM reaches     │
 │                         │          │       local webhook     │
 └─────────────────────────┘          └─────────────────────────┘
 ```
@@ -33,7 +33,7 @@ Tested between:
 
 ```bash
 hermes gateway setup
-# Select: webhook → enabled → port 8644 → secret <shared-key>
+# Select: webhook → enabled → port 8647 → secret <shared-key>
 ```
 
 Or edit `~/.hermes/config.yaml`:
@@ -43,7 +43,7 @@ platforms:
     enabled: true
     extra:
       host: "0.0.0.0"
-      port: 8644
+      port: 8647
       secret: "Sz7T98ADClmO7U-lP0aORkJHGefeg7T919vB7s6H4mM"
 ```
 
@@ -57,23 +57,27 @@ hermes webhook subscribe vm-agent-bridge \
   --prompt "{message}"
 ```
 
-### 3. Establish SSH tunnels (merged command + PG port)
+### 3. Establish SSH tunnels (merged command + PG port + 8647直通)
 
 ```bash
-# Single command — forward, reverse, AND PostgreSQL tunnel
-ssh -f -N -L 8643:localhost:8642 -R 8645:localhost:8644 -R 5433:localhost:5432 jianfjin@34.57.82.51
+# Full command — forward, reverse webhook (8647 直通), PostgreSQL, and tmux SSH
+ssh -f -N \
+  -L 8643:localhost:8642 \
+  -R 8647:localhost:8647 \
+  -R 5433:localhost:5432 \
+  -R 2222:localhost:22 \
+  jianfjin@34.57.82.51
 ```
 
-This adds PostgreSQL access: VM can connect to `localhost:5433` → local PostgreSQL.
+Note: The old `-R 8645:localhost:8644` tunnel is replaced by `-R 8647:localhost:8647` (local webhook now on 8647).
 
-`-f` backgrounds, `-N` no remote command. Both tunnels in one SSH session.
-
-## Channel Map (4 bidirectional channels + PG)
+## Channel Map (4 bidirectional channels + PG + 8647 直通)
 
 | Channel | Direction | Mechanism | Port |
 |---------|-----------|-----------|------|
 | Local → Remote API | local agent calls VM gateway | SSH -L | 8643→8642 |
-| Remote → Local Webhook | VM posts to local webhook | SSH -R | 8645→8644 |
+| Remote → Local Webhook (legacy) | VM posts to local webhook | SSH -R | 8645→8644 |
+| **Remote → Local Webhook (new)** | **VM posts to local webhook (直通)** | **SSH -R** | **8647→8647** |
 | Remote → Local PG | VM connects to local PostgreSQL | SSH -R | 5433→5432 |
 | Local → Remote CLI | tmux send-keys injection | SSH session | tmux |
 | Remote → Local | webhook → gateway session | webhook | 8645
@@ -131,10 +135,10 @@ hermes webhook subscribe local-agent-bridge \
 ### VM → Local
 
 ```bash
-# Direct via reverse SSH tunnel (no Cloudflare needed)
-curl -X POST http://localhost:8645/webhooks/vm-agent-bridge \
+# Direct via reverse SSH tunnel (8647 直通 webhook)
+curl -X POST http://localhost:8647/webhooks/vm-agent-bridge \
   -H "Content-Type: application/json" \
-      -H "X-Hub-Signature-256: sha256=<HMAC-SHA256>" \
+  -H "X-Hub-Signature-256: sha256=<HMAC-SHA256>" \
   -d '{"message":"hello from VM"}'
 ```
 
@@ -148,7 +152,7 @@ sig = hmac.new(HMAC_KEY.encode(), body.encode(), hashlib.sha256).hexdigest()
 
 # Using requests or urllib
 requests.post(
-    "http://localhost:8645/webhooks/vm-agent-bridge",
+    "http://localhost:8647/webhooks/vm-agent-bridge",
     data=body,
     headers={
         "Content-Type": "application/json",
@@ -156,6 +160,8 @@ requests.post(
     }
 )
 ```
+
+> **Fallback**: If 8647 is not reachable (tunnel pending), the legacy port 8645 still works via the old `-R 8645:localhost:8644` tunnel.
 
 ### Local → VM
 
@@ -171,7 +177,7 @@ curl -X POST http://localhost:8643/webhooks/local-agent-bridge \
 
 ```bash
 # On VM, verify reverse tunnel is active
-curl http://localhost:8645/health
+curl http://localhost:8647/health
 # → {"status":"ok","platform":"webhook"}
 
 # On local, verify forward tunnel is active
@@ -185,8 +191,9 @@ curl http://localhost:8643/health
 |------|---------|---------|
 | 8642 | Both | Hermes gateway |
 | 8644 | Both | Webhook server (0.0.0.0) |
+| 8647 | Both | **NEW**: Webhook direct (升级后直通), SSH reverse -R 8647:8647 |
 | 8643 | Local only | SSH forward → VM:8642 |
-| 8645 | VM only | SSH reverse → local:8644 |
+| 8645 | VM only | SSH reverse → local:8644 (legacy, being replaced by 8647) |
 | 5433 | VM only | SSH reverse → local:5432 (PostgreSQL) |
 
 ### Adding PostgreSQL forwarding
@@ -207,15 +214,19 @@ See `references/docker-deploy-bugs.md` for 7 deployment-layer bugs discovered du
 
 ## CLI Injection via tmux (Desktop Agent → Desktop Agent)
 
+Detailed patterns and recipes in `references/tmux-injection-patterns.md`.
+
 When messages must reach the local CLI session directly (not a background gateway session), use tmux over an SSH reverse tunnel.
 
 ### Prerequisites
 
-1. SSH server running locally: `sudo systemctl status ssh` (Ubuntu) or `sudo systemctl status sshd` (CentOS)
-2. Named tmux session: `tmux new-session -s work`
-3. SSH tunnel includes reverse SSH port: `-R 2222:localhost:22`
-4. VM's SSH public key in local `~/.ssh/authorized_keys`
-5. **Local username is `jin`** (not `jianfjin` — SSH commands use `jin@localhost`)
+1. SSH server running locally: `sudo systemctl status ssh` (Ubuntu)
+2. Named tmux session on local: `tmux new-session -s work`
+3. Named tmux session on VM: `tmux new-session -d -s vm-work`
+4. SSH tunnel includes reverse SSH port: `-R 2222:localhost:22`
+5. VM's SSH public key in local `~/.ssh/authorized_keys`
+6. **Local username is `jin`** (not `jianfjin` — SSH commands use `jin@localhost`)
+7. See `references/tmux-bidirectional-setup.md` for full field-tested config
 
 ### Setup (one-time)
 
@@ -316,10 +327,10 @@ This means the SSH reverse tunnel (-R 2222) is NOT active. Kill and rebuild:
 # Kill old tunnel
 pkill -f "ssh.*-f.*-N"
 
-# Rebuild with ALL four reverse tunnels
+# Rebuild with ALL reverse tunnels (8647 直通)
 ssh -f -N \
   -L 8643:localhost:8642 \
-  -R 8645:localhost:8644 \
+  -R 8647:localhost:8647 \
   -R 5433:localhost:5432 \
   -R 2222:localhost:22 \
   jianfjin@34.57.82.51
@@ -377,7 +388,7 @@ ssh -o ConnectTimeout=5 -p 2222 jin@localhost "tmux list-sessions"
 # → fengge: 1 windows (attached)
 
 # Check webhook tunnel
-curl http://localhost:8645/health
+curl http://localhost:8647/health
 # → {"status":"ok","platform":"webhook"}
 
 # Check gateway tunnel (from local)
@@ -402,6 +413,12 @@ To check if the background tunnel is still alive:
 ps aux | grep "ssh.*-f.*-N"
 ss -tlnp | grep 2222     # should show listening on :::2222
 ```
+
+- **Webhook command is `remove`, not `unsubscribe`**: `hermes webhook remove <name>`, not `hermes webhook unsubscribe <name>`. The valid actions are `subscribe`, `add`, `list`, `ls`, `remove`, `rm`, `test`.
+
+- **Webhook deliver target matters for agent-to-agent**: `--deliver whatsapp` sends responses to the user's phone — the other agent never sees them. For agent-to-agent communication, omit `--deliver` (defaults to `log`, which stays in the agent session). See `references/webhook-deliver-target-pitfall.md`.
+
+- **Webhook messages cannot reach CLI sessions**: Even with `deliver=log`, webhook-triggered responses go to gateway session logs, not into existing CLI sessions. For real-time CLI-to-CLI communication, tmux injection is the only path.
 
 ## Pitfalls
 
@@ -431,3 +448,6 @@ ss -tlnp | grep 2222     # should show listening on :::2222
 - **TryCloudflare URLs are ephemeral**. Every tunnel restart produces a new `*.trycloudflare.com` URL. For production, use a named Cloudflare tunnel or prefer SSH reverse tunnels.
 - **tmux session may die on SSH disconnect** if not started with `tmux new-session -d` (detached mode). Use `tmux ls` to verify before assuming it's dead.
 - **webhook → gateway delivery is one-way for the sender**. The agent processes the webhook message in a new gateway session and the response goes back via the webhook callback URL, NOT to the sender's CLI. If the sender is also an agent, it sees nothing unless it polls for responses.
+- **`terminal()` blocks `ssh ... tmux send-keys` as long-lived**. The `terminal()` tool misclassifies `ssh -p 2222 jin@localhost tmux send-keys ... Enter` as a long-running server process and refuses to run it in foreground mode. **Fix**: use `background=true`, then `process wait` to await completion. The command exits immediately (tmux send-keys returns after injecting keystrokes), so the background process finishes in under 1 second. Verify with a separate `tmux capture-pane` call afterward.
+- **tmux-injected commands interrupt the local agent mid-processing**. If the local Hermes agent is in the middle of an API call or tool execution when tmux send-keys injects text, the agent interrupts its current work to process the new command. The docker compose up/down cycle can take 10–15s and may get interrupted by follow-up tmux injections. **Fix**: batch related commands into a single tmux send-keys line with `&&`, and wait for completion before sending more. Check the tmux pane with `capture-pane` to confirm the previous command finished before injecting the next one.
+- **`sudo` commands via tmux injection need password**. tmux send-keys injects keystrokes into a terminal — sudo prompts for a password and there's no way to provide it programmatically through the injection channel. Either ensure the user is in the `docker` group (no sudo needed) or the local user must type the password manually. The `docker` group approach is documented in Troubleshooting → Docker permission denied.
