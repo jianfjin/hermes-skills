@@ -10,7 +10,7 @@ A multi-profile debate workflow where six AI personas — each with its own Herm
 
 ## Concept
 
-议会已扩编至9席（原6席 + 2026-05-13新增3席）：
+议会已扩编至15席（原9席 + 2026-05-21新增6席）：
 
 ```
 ┌──────────┬──────────────────────────┬────────────────────────────────┐
@@ -25,6 +25,12 @@ A multi-profile debate workflow where six AI personas — each with its own Herm
 │ Guido    │ CLA / 语言与API设计      │ kimi-k2.6                      │
 │ Dijkstra │ CSO / 算法正确性与形式化  │ kimi-k2.6                      │
 │ Jensen   │ CIO / 硬件策略与算力     │ deepseek-v4-flash              │
+│ Fei-Fei  │ CAS / 首席AI科学家       │ kimi-k2.6                      │
+│ Demi     │ CCT / 首席创意技术官     │ deepseek-v4-flash              │
+│ Lisa     │ CHO / 首席硬件官         │ deepseek-v4-flash              │
+│ Andrew   │ CLO / 首席学习官         │ kimi-k2.6                      │
+│ Andrej   │ CRO / 首席研究官         │ kimi-k2.6                      │
+│ Sam      │ CPSO / 首席政策与战略官  │ deepseek-v4-flash              │
 └──────────┴──────────────────────────┴────────────────────────────────┘
 ```
 
@@ -41,6 +47,12 @@ A multi-profile debate workflow where six AI personas — each with its own Herm
 | Guido van Rossum | CLA | API design, language readability, Pythonic standards, type systems |
 | Edsger Dijkstra | CSO | Algorithmic correctness, formal verification, complexity analysis, concurrency |
 | Jensen Huang | CIO | Hardware strategy, compute planning, GPU/infra optimization, deployment scaling |
+| Fei-Fei Li | CAS | AI/ML model quality, bias/fairness, training data sufficiency, human-centered AI |
+| Demi Guo | CCT | Product innovation, creative AI applications, user experience, startup speed |
+| Lisa Su | CHO | Chip architecture, HPC strategy, semiconductor supply chain, power/thermal |
+| Andrew Ng | CLO | AI education, training data quality, curriculum design, data-centric AI |
+| Andrej Karpathy | CRO | Deep learning architecture, training methodology, tokenization, scaling laws |
+| Sam Altman | CPSO | Strategic positioning, market dynamics, regulatory risk, competitive landscape |
 
 Feng Ge assigns work based on expertise, moderates debates, and synthesizes all views into a final recommendation.
 
@@ -50,8 +62,8 @@ Five seats now operate in English-native SOUL.md (updated 2026-05-14):
 
 | Language | Seats |
 |----------|-------|
-| **English** | Musk (CVO), Jobs (CPO), Linus (Arch), Guido (CLA), Dijkstra (CSO) |
-| **Chinese** | Feng Ge (CTO), Zhang Xuefeng (CSA), Zhang Xiaolong (Eng), Jensen (CIO) |
+| **English** | Musk (CVO), Jobs (CPO), Linus (Arch), Guido (CLA), Dijkstra (CSO), Jensen (CIO), Fei-Fei (CAS), Demi (CCT), Lisa (CHO), Andrew (CLO), Andrej (CRO), Sam (CPSO) |
+| **Chinese** | Feng Ge (CTO), Zhang Xuefeng (CSA), Zhang Xiaolong (Eng) |
 
 When launching debate agents, use the appropriate language for each seat. English seats receive English prompts; Chinese seats receive Chinese prompts. Mixed-language debates are normal — the CTO synthesizes across both.
 
@@ -65,7 +77,8 @@ For domain-specific questions, select only the relevant subset:
 | **Product** | Jobs + Musk + Xuefeng | UX, feature prioritization, market fit |
 | **Audit** | Xuefeng + Linus + Guido + Dijkstra | Contract review, technical debt, risk assessment |
 | **External Eval** | Musk + Dijkstra + Guido + Linus + Xuefeng | Evaluating third-party frameworks/patterns (e.g., Palantir Ontology) |
-| **Two-Design Comparison** | All 8 non-CTO seats | Comparing two complete design proposals (e.g., council's own vs external agent's docs). CTO pre-reads both designs, writes comparison brief, launches full council, produces fusion recommendation |\n| **Plan Review** | Jobs + Musk + Guido + Linus + Xiaolong + Xuefeng | Auditing a concrete implementation plan for scope, cost, and architecture. Nearly always results in significant scope reduction. Full pattern: `references/visualization-plan-review-pattern.md` |\n| **Codex Branch Audit** | All 8 non-CTO seats | External agent branch deletes council-approved code. Diff shows >100 lines of deletions or reversions. Each seat evaluates from domain. CTO produces MERGE/REJECT verdict. See `references/codex-branch-audit-pattern.md` |
+| **Two-Design Comparison** | All 8 non-CTO seats | Comparing two complete design proposals (e.g., council's own vs external agent's docs). CTO pre-reads both designs, writes comparison brief, launches full council, produces fusion recommendation |
+| **Cross-Team Joint Debate** | Both VM + local teams | Two independent teams produce plans → exchange → joint vote. Used for DR/backup, architecture decisions where local and VM teams disagree. See `references/cross-team-debate-pattern.md` |\n| **Plan Review** | Jobs + Musk + Guido + Linus + Xiaolong + Xuefeng | Auditing a concrete implementation plan for scope, cost, and architecture. Nearly always results in significant scope reduction. Full pattern: `references/visualization-plan-review-pattern.md` |\n| **Codex Branch Audit** | All 8 non-CTO seats | External agent branch deletes council-approved code. Diff shows >100 lines of deletions or reversions. Each seat evaluates from domain. CTO produces MERGE/REJECT verdict. See `references/codex-branch-audit-pattern.md` |
 
 The CTO pre-digests inputs before launching the debate. Each agent should receive a focused question relevant to their seat, not the full technical brief. See `references/ontology-debate-findings.md` for an example of a focused external-evaluation debate.
 
@@ -76,6 +89,8 @@ The CTO pre-digests inputs before launching the debate. Each agent should receiv
 **Multi-round debates**: When the same council subset must debate multiple topics in one session, run them sequentially — one full round per topic. Never launch the same profile for two debates simultaneously. Full worked example at `references/scailed-multi-round-debate-example.md`. Post-debate, cascade decisions into `architecture-spec.html` as evaluation sections, not just the council resolution.
 
 ### When NOT to launch: CTO Solo Synthesis
+
+**Worked example** (2026-05-20, DR Plan Two-Team Comparison): The Emperor ordered both the VM Council and the Local Team to produce independent disaster recovery plans, then compared them. The VM Council convened 6 seats (Musk/Jensen/Linus/Xiaolong/Xuefeng/Dijkstra) and unanimously rejected master-slave replication (€12,000+ over 3 years) in favor of pg_dump + WAL to cloud + automated restore verification (€1,816). Full comparison at `references/dr-plan-two-team-comparison-2026-05-20.md`.
 
 Not every question needs the council. Launching 8 parallel profiles takes 2-5 minutes of wall-clock time, consumes API credits across multiple providers, and is overkill for simple product comparisons or single-option evaluations. The CTO should default to solo synthesis when:
 
@@ -381,7 +396,39 @@ Requested wait timeouts (e.g., `timeout=120`) are clamped by the Hermes process 
 
 See `references/scailed-wp4-audit-cascade-example.md` for the complete worked example with all 17 findings, the cascade matrix, and before/after diffs.
 
-### Pattern E: Two-Design Comparison Debate (2026-05-15, battle-tested)
+### Pattern F: Cross-Team Joint Debate + Vote (2026-05-20, battle-tested)
+
+When two independent agent teams (e.g., VM council + local council) must debate the same topic and produce a joint resolution, run sequential rounds with formal voting.
+
+**Context**: VM parliament (6 seats) and local parliament (9 seats) both produced DR/backup plans. The Emperor ordered both teams to debate each other's proposals and vote on every item.
+
+**Step 1: Both teams produce independent proposals.** Each team's CTO convenes their own council, debates internally, writes a plan document. No cross-team coordination yet.
+
+**Step 2: Team A sends proposal to Team B.** Push to shared repo, notify via tmux or webhook. Team B's council reviews the proposal and votes on each item.
+
+**Step 3: Team B votes and produces rebuttal.** Format: a vote table with seat | item | vote | reason columns. Items are specific, concrete proposals (not abstract principles). Push rebuttal document.
+
+**Step 4: Team A reviews rebuttal and re-votes.** All items re-polled. Unanimous items are locked. Disputed items get a second round of reasoning.
+
+**Step 5: Joint resolution.** CTO of the initiating team synthesizes both vote tables into a single resolution document. Every item gets a joint vote count (e.g., "15/0 PASS").
+
+**Step 6: Emperor ratifies.** The joint resolution goes to the Emperor for final approval. Emperor may accept, reject individual items, or order further debate.
+
+**Key rules for cross-team debates:**
+
+1. **Vote on concrete proposals, not principles.** "Should we have backups?" → too vague. "pg_dump cron to R2 with sha256 verification?" → votable.
+
+2. **Each item gets its own row in the vote table.** No bundling. Every seat votes on every item.
+
+3. **Rebuttal documents are formal.** They include the full vote table, each seat's reason, and a synthesis section identifying points of agreement and remaining disagreement.
+
+4. **Cross-team communication uses GitHub + tmux.** Proposals pushed to shared repo. Notifications via `tmux send-keys` (CLI agents) or webhook (gateway agents). Real-time cross-agent chat is not required — sequential rounds work fine.
+
+5. **When both teams agree unanimously on an item, it's locked.** No further debate on that item unless the Emperor orders it.
+
+**Worked example**: `scailed_wp4/docs/plans/2026-05-20-joint-vote-rebuttal.md` and `docs/plans/2026-05-20-joint-dr-resolution.md`. VM council (6 seats) + local council (9 seats) = 16-seat joint vote. All 4 DR items passed unanimously (15/0). Budget went from €12,000 → €1,816 → €0 via R2 free tier.
+
+**Pitfall**: Don't try to have agents from different machines debate in real-time. Agents are isolated processes — they can't "hear" each other. Sequential rounds (Team A produces → Team B reviews → Team A rebuts → joint vote) are the correct pattern.
 
 When the user has two complete design proposals (e.g., the council's own design vs an external agent's `docs/` directory), run a full 8-seat comparison debate. This is distinct from the External Eval pattern (which evaluates a single third-party framework) — here, two complete proposals with different scopes, tech stacks, and philosophies are compared side-by-side.
 
@@ -477,6 +524,27 @@ When a new module needs test coverage, delegate to programming-heavy seats with 
 **Worked example:** Visualization module — 73 tests, 73 pass, 96% coverage. Linus fixed None-safety bug in adapter during test generation.
 
 **Pitfalls:** deduplicate overlapping tests before commit; kimi agents slow for test gen (4m52s); kill agents stuck on curator loops.
+
+### Pattern F: Cross-Team Joint Debate (VM + Local)
+
+When two independent agent teams (e.g., VM council and local machine council) debate the same topic, run sequential rounds with joint voting.
+
+**Step 1: Both teams produce independent proposals.** Each CTO convenes their own council. Both proposals are committed to a shared repo.
+
+**Step 2: Team A reviews Team B's proposal.** Re-convene Team A with a focused brief summarizing Team B's position and asking for item-by-item votes. Produce a rebuttal with vote table.
+
+**Step 3: Team B reviews Team A's rebuttal.** Same process, reversed.
+
+**Step 4: Joint vote table.** Combine both teams' votes into one table. Each CTO signs. The Emperor (user) makes the final binding decision.
+
+**Key rules for cross-team debates:**
+- Each round is independent — don't launch agents from both teams simultaneously against the same brief
+- Round 1 is always "produce your own proposal" for both teams
+- Round 2+ is "review the other team's proposal and vote"
+- The final joint resolution must cite every seat's vote and include the adopted conditions from both sides
+- If one team fully concedes (e.g., 9/0 agreeing with the other team's position), note the concession explicitly
+
+**Worked example**: 2026-05-20 SCAILED DR plan debate. VM council (6 seats) produced proposal, local council (9 seats) produced alternative. VM council reviewed local plan, voted 6/0 on all 4 items against local team's approach. Local team conceded 9/0 on all items. Joint resolution: 15/0 unanimous.
 
 ## Pitfalls
 
