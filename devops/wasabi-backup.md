@@ -10,34 +10,25 @@ S3-compatible cloud backup for PostgreSQL. Wasabi chosen over B2 because: no egr
 
 ## Setup (one-time)
 
-### 1. Create Wasabi bucket
-```
-wasabi.com → sign up → Create Bucket: scailed-backups
-Region: eu-central-1 (Frankfurt, nearest to The Hague)
-```
+### Primary: Cloudflare R2 (€0, 10GB free tier)
 
-### 2. Install rclone
-```bash
-curl https://rclone.org/install.sh | sudo bash
-```
-
-### 3. Configure rclone
+1. Cloudflare Dashboard → R2 → Create Bucket: `scailed-backups`
+2. Create API Token (R2 Read/Write)
+3. rclone config:
 ```bash
 rclone config
 # n) New remote
-# name: wasabi
+# name: r2
 # type: s3
-# provider: Wasabi
-# access_key_id: <AK>
-# secret_access_key: <SK>
-# region: eu-central-1
-# endpoint: s3.eu-central-1.wasabisys.com
+# provider: Cloudflare
+# access_key_id: <R2_Access_Key>
+# secret_access_key: <R2_Secret_Key>
+# endpoint: https://<account_id>.r2.cloudflarestorage.com
 ```
 
-### 4. Verify
-```bash
-rclone ls wasabi:scailed-backups/
-```
+SCAILED data: ~50MB/day × 30-day retention = 1.5GB. Well within R2 free tier (10GB storage + 1M Class A ops + 10M Class B ops).
+
+### Fallback: Wasabi (€6/month, no egress)
 
 ## Backup Script
 
@@ -56,12 +47,12 @@ docker exec scailed-postgres pg_dump -U pathfinder -Fc -f "$DUMP"
 echo "$LABEL Checksum..."
 sha256sum "$DUMP" > "${DUMP}.sha256"
 
-echo "$LABEL Uploading to Wasabi..."
-rclone copy "$DUMP" wasabi:scailed-backups/pg/
-rclone copy "${DUMP}.sha256" wasabi:scailed-backups/pg/
+echo "$LABEL Uploading to R2..."
+rclone copy "$DUMP" r2:scailed-backups/pg/
+rclone copy "${DUMP}.sha256" r2:scailed-backups/pg/
 
 echo "$LABEL Cleaning old backups..."
-rclone delete --min-age 30d wasabi:scailed-backups/pg/
+rclone delete --min-age 30d r2:scailed-backups/pg/
 find /backups/pg/ -name "*.dump" -mtime +7 -delete
 
 echo "$LABEL Done."
