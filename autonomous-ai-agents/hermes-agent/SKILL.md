@@ -202,40 +202,64 @@ hermes profile import FILE  Import from archive
 
 ### Cross-Machine Hermes Migration
 
-To replicate a Hermes setup (profiles, skills, scripts, memory) to another machine:
+To replicate portable Hermes state (profiles' identities, skills, scripts, memory) to another machine:
 
-**Step 1: Package essentials only.** Profiles contain large caches (skills/ copies, bin/, sessions/) that are auto-regenerated. Only `config.yaml` and `SOUL.md` per profile are needed:
+**Step 1: Package portable state only.** Profiles contain large caches (skills/ copies, bin/, sessions/) that are auto-regenerated. Do **not** package any `config.yaml`, `.env`, or `auth.json` files: they are local-machine credential/provider state and can overwrite working API-key setups on the destination.
 
 ```bash
 tar czf /tmp/hermes-migration-$(date +%Y%m%d).tar.gz \
   -C ~ \
-  .hermes/config.yaml \
-  .hermes/profiles/*/config.yaml \
+  --exclude='.hermes/config.yaml' \
+  --exclude='.hermes/.env' \
+  --exclude='.hermes/auth.json' \
+  --exclude='.hermes/profiles/*/config.yaml' \
+  --exclude='.hermes/profiles/*/.env' \
+  --exclude='.hermes/profiles/*/auth.json' \
+  --exclude='.hermes/profiles/*/skills' \
+  --exclude='.hermes/profiles/*/bin' \
+  --exclude='.hermes/profiles/*/sessions' \
   .hermes/profiles/*/SOUL.md \
   .hermes/skills/ \
   .hermes/scripts/ \
   .hermes/memories/
 ```
 
-A full 8-profile setup with skills compresses to ~3MB.
+A full multi-profile setup with skills compresses to a few MB.
 
-**Step 2: Transfer and unpack on new machine:**
+**Step 2: Transfer the archive to the new machine, but do not unpack it yet:**
 
 ```bash
 scp user@old-vm:/tmp/hermes-migration-*.tar.gz ~/
-tar xzf hermes-migration-*.tar.gz -C ~/
+ARCHIVE=$(ls -t ~/hermes-migration-*.tar.gz | head -1)
 ```
 
-**Step 3: Re-create profiles.** The unpacked files go to the right directories, but Hermes needs profiles registered:
+**Step 3: Register profiles before unpacking.** The archive contains `SOUL.md` files under `.hermes/profiles/<name>/`, so unpacking first creates profile directories and makes `hermes profile create` fail with “already exists”. Derive profile names from the archive, create missing profiles with the destination machine's local defaults, then unpack the portable files over them:
 
 ```bash
-for p in musk xuefeng linus xiaolong steve guido dijkstra jensen; do
-  hermes profile create $p --clone-from default
+PROFILE_NAMES=$(tar tzf "$ARCHIVE" \
+  | sed -n 's#^\.hermes/profiles/\([^/][^/]*\)/SOUL\.md$#\1#p' \
+  | sort -u)
+
+for p in $PROFILE_NAMES; do
+  if ! hermes profile show "$p" >/dev/null 2>&1; then
+    hermes profile create "$p" --clone-from default
+  fi
 done
-# The unpacked config.yaml and SOUL.md now override cloned defaults
+
+tar xzf "$ARCHIVE" -C ~/
 ```
 
-**What NOT to migrate:** profiles/*/skills/ (auto-regenerated, 12MB+ each), profiles/*/bin/ (platform-specific), profiles/*/sessions/ (diverges naturally), API keys (reconfigure or use password manager).
+This order keeps the destination machine's local `config.yaml`, `.env`, and `auth.json` files while restoring migrated `SOUL.md`, skills, scripts, and memories.
+
+**Step 4: Configure credentials locally.** Each machine needs its own provider/API-key/OAuth setup:
+
+```bash
+hermes setup model
+# or for OAuth providers:
+hermes auth add
+```
+
+**What NOT to migrate:** top-level `config.yaml`, profile `config.yaml`, `.env`, `auth.json`, profiles/*/skills/ (auto-regenerated, 12MB+ each), profiles/*/bin/ (platform-specific), profiles/*/sessions/ (diverges naturally), and API keys/OAuth tokens (reconfigure or use a password-manager CLI).
 
 ### Two-Machine Sync Strategy
 
