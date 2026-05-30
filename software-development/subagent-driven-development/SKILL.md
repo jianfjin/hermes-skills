@@ -201,6 +201,91 @@ git add -A && git commit -m "feat: complete [feature name] implementation"
 - "Add JWT token generation"
 - "Create registration endpoint"
 
+## Parallel Subagent Dispatch by File Boundary
+
+When tasks have non-overlapping file domains, dispatch them in **parallel** via simultaneous `delegate_task` calls:
+
+**Concurrency limit:** The system enforces `max_concurrent_children=3` (configurable in `~/.hermes/hermes-agent/config.yaml` under `delegation.max_concurrent_children`). If you have 4+ tasks, split into batches of 3 — the second batch starts after the first batch's promises resolve.
+
+```python
+# Batch 1: 3 tasks in parallel
+tasks_1 = delegate_task(tasks=[task1, task2, task3])
+
+# Batch 2: sequential after batch 1
+tasks_2 = delegate_task(tasks=[task4, task5])
+```
+
+```python
+delegate_task(goal="Delete all AGE code", context="...", toolsets=['terminal','file','search'])
+delegate_task(goal="Create new repo layer + dashboard", context="...", toolsets=['terminal','file','search'])
+```
+
+**Rules for parallel dispatch:**
+- Tasks MUST touch **different files** — no overlap whatsoever
+- One task creates files, another deletes files = safe
+- Two tasks modifying the same file = DO NOT parallelize
+- After both complete, the parent session does **integration wiring**
+- Verify no conflicts: `git diff --name-only` after both complete
+
+**When to parallelize vs serialize:**
+| Pattern | When | Example |
+|---------|------|---------|
+| Parallel by file boundary | Files are independent | One agent deletes, another creates |
+| Serial (dependency chain) | Task B depends on Task A | Schema first, then code that uses it |
+| Serial (same file edits) | Both tasks modify same file | Both add routes to api/main.py |
+
+**After parallel dispatch, the PARENT session always does integration wiring:**
+```python
+# Phase 1: Dispatch parallel subagents (touch different files)
+delegate_task(goal="Delete AGE code", ...)     # removes files, cleans imports
+delegate_task(goal="Create repos + dashboard", ...)  # creates new files
+
+# Phase 2: WAIT for both to complete (via notify_on_complete + poll)
+
+# Phase 3: PARENT integrates — this is critical and non-delegable
+# The parent session wires the new components into existing service code
+# because integration touches BOTH sets of files (the ones A created and B modified)
+patch("assessment_service.py", import repos + add PG write hooks)
+```
+
+**The parent must own integration because:**
+- Integration code lives at the BOUNDARY between parallel workstreams
+- Subagent A doesn't know what B created; subagent B doesn't know what A deleted
+- Only the parent has the full picture of both workstreams
+- Integration is typically <50 lines, not worth a subagent
+
+## Docs-First Workflow
+
+This user requires **docs first, review second, code third**:
+
+1. Write documentation (design doc, spec, architecture overview)
+2. Have one or more agents review the docs
+3. Only AFTER docs review passes, write code
+
+**Do NOT:** write code before docs, skip review, or treat docs as an afterthought.
+
+## Pitfalls
+
+### Tests That Don't Actually Execute
+
+```python
+# WRONG — does nothing, test always passes
+def test_foo():
+    pytest.mark.asyncio(some_coro())  # no `await`, no async def
+
+# RIGHT — actually executes
+@pytest.mark.asyncio
+async def test_foo():
+    result = await some_coro()
+    assert result == expected
+```
+
+Always verify tests execute before declaring them done:
+```bash
+python3 -m unittest tests/test_file.py -v
+python3 -c "import asyncio; asyncio.run(test_func())"
+```
+
 ## Red Flags — Never Do These
 
 - Start implementation without a plan
@@ -215,6 +300,118 @@ git add -A && git commit -m "feat: complete [feature name] implementation"
 - Let implementer self-review replace actual review (both are needed)
 - **Start code quality review before spec compliance is PASS** (wrong order)
 - Move to next task while either review has open issues
+- **Skip writing tests** — all new code must have tests. The user will ask "测试有没有写？" if they're missing. Tests are NOT optional.
+
+## Multi-Lens Parallel Code Review Pattern
+
+**Validated:** 2026-05-28 — daemon 2b implementation (3 concurrent reviewers: Demi/founder, Karpathy/CRO, 张雪峰/auditor)
+
+When the user wants multiple independent perspectives on the same codebase, dispatch **parallel** `delegate_task` calls with distinct reviewer lenses. Each lens catches a different class of defect.
+
+### Available Lenses
+
+| Lens | Character | Catches | Common findings |
+|------|-----------|---------|-----------------|
+| **Startup Founder** | Demi Guo | Overengineering, scope creep, wrong priorities | MVP too fat, fake tests, dead code, premature optimization |
+| **CRO / Architect** | Andrej Karpathy | Design flaws, concurrency bugs, dependency gaps | Dual delivery paths, missing WAL mode, DB path inconsistencies, design-level anti-patterns |
+| **Auditor** | 张雪峰 | Observability gaps, single points of failure, security | No log rotation, hook init exit(1), no traceback, missing idempotency |
+| **Academic / Systems** | Fei-Fei Li | Schema completeness, non-functional requirements, testing coverage | Missing type contracts, gaps against spec, underestimated complexity |
+| **Kernel / Infrastructure** | Linus Torvalds | Low-level correctness, resource leaks, error handling | Missing edge cases, inconsistent error propagation |
+| **Formal / Correctness** | Edsger Dijkstra | Logic errors, concurrency proofs, type safety | Race conditions, unproven termination, type mismatches |
+
+### How to Dispatch
+
+```python
+# Read the codebase first
+read_file("scripts/daemon-2b.py")
+read_file("scripts/daemon-2b-dlq.py")
+
+# Dispatch 3 concurrent reviewers (max_concurrent_children=3)
+delegate_task(
+    goal="Demi Guo: startup founder review. Is this MVP-sized? What's unnecessary?",
+    context="Full codebase contents + your lens",
+    toolsets=['terminal', 'file']
+)
+delegate_task(
+    goal="Andrej Karpathy: CRO architecture review. Design flaws? Concurrency?",
+    context="Full codebase contents + your lens", 
+    toolsets=['terminal', 'file']
+)
+delegate_task(
+    goal="张雪峰: auditor review. Observability? Single points of failure? Security?",
+    context="Full codebase contents + your lens",
+    toolsets=['terminal', 'file']
+)
+```
+
+### What Each Lens Typically Finds
+
+From the validated session (daemon 2b, 3 reviewers, 11 files, ~3000 lines):
+
+| Defect Class | Founder | CRO | Auditor | Example finding |
+|-------------|---------|-----|---------|-----------------|
+| Architecture | No | Yes | No | Dual delivery path (callback + poll) |
+| Concurrency | No | Yes | No | Missing WAL mode for SQLite |
+| MVP scope | Yes | No | No | "28 tasks → real MVP is 6" |
+| Dead code | Yes | Yes | Yes | record_failure() doesn't record |
+| Observability | No | No | Yes | No traceback in exception handler |
+| Single point of failure | No | No | Yes | hook init failure = exit(1) |
+| Fake tests | Yes | No | Yes | test_sighup_handler_registered mocks nothing |
+| File naming | Yes | Yes | Yes | Hyphenated filenames break Python import |
+| Pornographic comments | No | Yes | No | Sexually explicit text in docstrings |
+
+### Consolidation
+
+After all 3 reviewers complete, produce a consolidated report:
+
+1. **Cross-reference findings** — which issues multiple reviewers flagged (P0 priority)
+2. **Lens-unique findings** — issues only one reviewer caught (still valid, lower priority)
+3. **Actionable fix list** — prioritized by severity and recurrence across lenses
+
+Save the consolidated report to the project directory. Then dispatch fix subagents per issue cluster.
+
+### When to Use Which Lenses
+
+| Review target | Recommended lenses |
+|---------------|-------------------|
+| MVP / prototype | Founder + Architect |
+| Production deployment | Architect + Auditor |
+| Security-sensitive | Auditor + Architect |
+| Distributed system | Architect + Formal |
+| Existing code refactor | Founder + Kernel |
+| Full lifecycle | Founder + Architect + Auditor (minimum) |
+
+## Council Delegation Pattern
+
+When task domain matches a specific council seat (e.g., Linus for architecture, Xiaolong for engineering), use `delegate_task` with their profile persona embedded in the goal:
+
+```python
+# Linus (architecture): AGE removal, code cleanup
+delegate_task(
+    goal="Delete all Apache AGE related code from the project",
+    context="...detailed context...",
+    toolsets=['terminal', 'file', 'search']
+)
+
+# Xiaolong (engineering): new repository layer, dashboards
+delegate_task(
+    goal="Create PostgreSQL repository layer and Kanban dashboard",
+    context="...detailed context...",
+    toolsets=['terminal', 'file', 'search']
+)
+```
+
+**Key differences from launching council profiles via terminal:**
+- `delegate_task` creates an isolated subagent that can run file operations — council profiles via `terminal` can only chat
+- The subagent has access to tools (file, search, terminal) — council profiles don't
+- Use `delegate_task` for implementation work, use `terminal("profile chat ...")` for analysis/opinion
+
+**When to use each:**
+| Need | Method |
+|------|--------|
+| Architecture analysis, debate | `terminal("linus chat ...")` — council profile |
+| Implementation, code changes | `delegate_task(goal="...")` — subagent |
+| Code review after implementation | `delegate_task(goal="Review ...")` — subagent or council profile |
 
 ## Handling Issues
 

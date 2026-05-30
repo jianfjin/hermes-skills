@@ -497,6 +497,12 @@ vault in Obsidian on your laptop/phone — changes appear within seconds.
 - **Handle contradictions explicitly** — don't silently overwrite. Note both claims with dates,
   mark in frontmatter, flag for user review.
 
+## Reference Files
+
+This skill ships reference documents for advanced deployment patterns. See `references/`:
+
+- `per-profile-cron-wiki.md` — Deploy per-agent LLM wikis inside Hermes profile directories, wired to cron jobs for daily automated knowledge ingestion from briefings
+
 ## Related Tools
 
 [llm-wiki-compiler](https://github.com/atomicmemory/llm-wiki-compiler) is a Node.js CLI that

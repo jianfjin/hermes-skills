@@ -1,7 +1,7 @@
 ---
 name: hermes-agent
 description: "Configure, extend, or contribute to Hermes Agent."
-version: 2.1.0
+version: 2.3.0
 author: Hermes Agent + Teknium
 license: MIT
 platforms: [linux, macos, windows]
@@ -246,7 +246,7 @@ Treat skills and profiles as code:
 3. **config.yaml:** Do NOT git (API keys). Manual sync or password-manager CLI.
 4. **Auto-sync:** Optional cron: `cd ~/.hermes/skills && git pull --rebase`
 
-### Credential Pools
+### OAuth / Device-code auth
 
 ```bash
 hermes auth add             Interactive credential wizard
@@ -254,6 +254,11 @@ hermes auth list [PROVIDER] List pooled credentials
 hermes auth remove P INDEX  Remove by provider + index
 hermes auth reset PROVIDER  Clear exhaustion status
 ```
+
+**Headless VM (no browser):** use `hermes auth add <provider> --no-browser`.
+Opens device-code flow instead of local web server. See
+`references/headless-vm-oauth.md` for the full workflow and PTY-capture
+pitfalls.
 
 ### Other
 
@@ -424,6 +429,7 @@ Full config reference: https://hermes-agent.nousresearch.com/docs/user-guide/con
 | Google Gemini | API key | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
 | DeepSeek | API key | `DEEPSEEK_API_KEY` |
 | xAI / Grok | API key | `XAI_API_KEY` |
+| Groq (LLM inference) | API key (gsk_ prefix) | `GROQ_API_KEY` | `base_url: https://api.groq.com/openai/v1` |
 | Hugging Face | Token | `HF_TOKEN` |
 | Z.AI / GLM | API key | `GLM_API_KEY` |
 | MiniMax | API key | `MINIMAX_API_KEY` |
@@ -494,20 +500,6 @@ Secret redaction is **off by default** — tool output (terminal stdout, `read_f
 
 ```bash
 hermes config set security.redact_secrets true       # enable globally
-```
-
-**Restart required.** `security.redact_secrets` is snapshotted at import time — toggling it mid-session (e.g. via `export HERMES_REDACT_SECRETS=true` from a tool call) will NOT take effect for the running process. Tell the user to run `hermes config set security.redact_secrets true` in a terminal, then start a new session. This is deliberate — it prevents an LLM from flipping the toggle on itself mid-task.
-
-Disable again with:
-```bash
-hermes config set security.redact_secrets false
-```
-
-### PII redaction in gateway messages
-
-Separate from secret redaction. When enabled, the gateway hashes user IDs and strips phone numbers from the session context before it reaches the model:
-
-```bash
 hermes config set privacy.redact_pii true    # enable
 hermes config set privacy.redact_pii false   # disable (default)
 ```
@@ -680,6 +672,55 @@ terminal(command="xuefeng chat -q '...'", background=true, notify_on_complete=tr
 ```
 
 Each profile gets a CLI wrapper at `~/.local/bin/<name>`. See `references/multi-profile-parallel-agents.md` for the full pattern, and `scripts/inner-circle-debate.sh` for the launcher script.
+
+### Multi-Profile Implementation Delegation (Code Workflow)
+
+For code writing and review workflows through persona profiles, use `hermes -p <profile> chat -q` with file-writing capabilities:
+
+```bash
+# Architecture review (returns text verdict)
+terminal(command="hermes -p linus chat -q '...review this plan...' --quiet -t terminal,file", background=true)
+
+# Python/Schema review (returns text verdict)
+terminal(command="hermes -p guido chat -q '...review schema...' --quiet -t terminal,file", background=true)
+
+# Code implementation (writes files via terminal tools)
+terminal(command="hermes -p xiaolong chat -q '...write code...' --quiet -t terminal,file", background=true, timeout=900)
+```
+
+**Key differences from debate pattern:**
+- Profiles write code files to disk via their `terminal` tool access
+- `-t terminal,file` flags must be explicit to enable writing
+- `timeout` must be set high (600-900s) for multi-file implementations
+- Collect results via `process(..., action=wait|log)` after completion
+- Use `notify_on_complete=true` to get notified when each profile finishes
+
+**NSFW note:** deepseek-v4-pro/flash rejects explicit content at the provider level even when SOUL.md authorizes it. Use xAI Grok models for profiles that need to generate NSFW content. See `references/delegate-vs-profile-chat.md` for the full NSFW guardrail comparison table.
+
+---
+
+## Using Hermes as a Backend API Server
+
+The Hermes Gateway API Server (port 8642 by default) exposes an **OpenAI-compatible `/v1/chat/completions`** endpoint. This lets you replace a custom RAG/LLM backend service with a direct call to Hermes — the frontend calls the Hermes API instead of your own Python server.
+
+```bash
+# Quick test
+curl -s http://localhost:8642/v1/chat/completions \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sekret" \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hello"}]}'
+```
+
+Three architectural patterns are documented in `references/api-server-as-backend.md`:
+
+| Pattern | Frontend Change | Backend Change | Best For |
+|---------|:--------------:|:--------------:|----------|
+| **A: Direct call** | ~12 lines | 0 | New projects, controlled frontend |
+| **B: Thin proxy** | 0 | Rewrite backend | Existing backend contract |
+| **C: Webhook** | Full rewrite | N/A | Async notifications only |
+
+Key pitfalls covered in the reference: OpenAI response format vs custom schema, stateless session management (pass full history each time), missing sources/citations (instruct in system prompt or post-process), CORS config, and auth header format.
 
 ---
 
@@ -875,17 +916,76 @@ and logs — avoids shell-escaping backslashes in bash.
 3. `/reset` after enabling tools
 
 ### Model/provider issues
-1. `hermes doctor` — check config and dependencies
-2. `hermes login` — re-authenticate OAuth providers
-3. Check `.env` has the right API key
-4. **Copilot 403**: `gh auth login` tokens do NOT work for Copilot API. You must use the Copilot-specific OAuth device code flow via `hermes model` → GitHub Copilot.
-5. **Model context window below 64K minimum (e.g. kimi-k2.6 at 32K)**: Hermes Agent requires at least 64K context. To bypass for smaller models, set TWO config keys:
+
+#### OpenAI Codex / OAuth provider: `'NoneType' object is not iterable`
+
+When using the `openai-codex` provider (OAuth device-code flow) with ANY model, the agent immediately crashes with:
+```
+Error: 'NoneType' object is not iterable
+```
+**DO NOT** assume the model name is wrong — it's an SDK-level bug that affects all models on this provider.
+
+**Root cause:** OpenAI Python SDK (v2.32.0–2.38.0) has a bug in `openai/lib/_parsing/_responses.py`, function `parse_response()`, line 61. The Codex OAuth backend streams events with `"output": null` in the response. The SDK's code:
+```python
+for output in response.output:  # <-- crashes when response.output is None
+```
+Does not guard against `None`.
+
+**Fix:** Patch the SDK in two locations:
+```bash
+# Location 1: user-site (used by standalone Python)
+~/.local/lib/python3.11/site-packages/openai/lib/_parsing/_responses.py
+
+# Location 2: Hermes agent venv (used by `hermes` CLI)
+~/.hermes/hermes-agent/venv/lib/python3.11/site-packages/openai/lib/_parsing/_responses.py
+```
+Change line 61 from:
+```python
+    for output in response.output:
+```
+to:
+```python
+    for output in (response.output or []):
+```
+
+**Verification:** After patching, test with any profile:
+```bash
+hermes -p <profile> chat -q 'Hi' --model gpt-5.3-codex --provider openai-codex
+```
+
+**Caveat:** This patch is overwritten on `pip install --upgrade openai`. Re-apply after SDK upgrades.
+
+See `references/codex-oauth-sdk-bug-debug.md` for the full diagnostic trace, reproduction script, and maintenance sed command.
+
+**Additional Codex OAuth quirks discovered:**
+- The Codex backend (`chatgpt.com/backend-api/codex`) **requires** `stream=True` — non-streaming calls return 400
+- The `input` field must be a list (e.g. `[{"role": "user", "content": "..."}]`), not a string
+- Available models are gated by ChatGPT account entitlements — not all models in DEFAULT_CODEX_MODELS (`hermes_cli/codex_models.py`) are available to every account
+- The OAuth credential is stored in `~/.hermes/auth.json` under `credential_pool.openai-codex`
+
+#### Copilot 403 for Copilot API. You must use the Copilot-specific OAuth device code flow via `hermes model` → GitHub Copilot.
+5. **Groq vs Grok (xAI) key confusion**: This is the #1 API-key troubleshooting case. Users generate a key on **Groq** (groq.com, for Llama/Mixtral/DeepSeek inference on LPUs, key prefix `gsk_`) but the config points to **xAI** (api.x.ai, for Grok models). The symptom is a clean HTTP 400 with message `Incorrect API key provided` — the endpoint doesn't recognize keys from the other platform. However, a **working** key can also return HTTP 403 `Your team ... has either used all available credits` if the xAI free-trial credits are exhausted. Two-stage diagnosis:
+   - **HTTP 400** = wrong platform (regen key on correct console, or change `model.base_url`)
+   - **HTTP 403** = correct platform but account has no credits left (add billing at console.x.ai/billing)
+   
+   Key formats: xAI issues both `gsk_...` (legacy) and `xai-...` (newer). Groq only `gsk_...`. You CANNOT distinguish by prefix alone.
+   
+   Fix: either regenerate the key on the correct platform (console.x.ai for Grok, console.groq.com for Groq) and set the matching `XAI_API_KEY` or `GROQ_API_KEY` env var, OR change `base_url` to match the platform the key was generated for.
+   Reference + pricing comparison: `references/groq-vs-grok-provider-confusion.md`.
+8. **xAI Grok models reject `reasoningEffect` parameter**: When using xAI Grok models (e.g. `grok-4.20-0309-reasoning`, `grok-4.20-reasoning`), Hermes sends `reasoningEffect` as an API parameter if `agent.reasoning_effort` is set to anything other than `none`. xAI's API does not support this parameter, causing this error:
+   ```
+   Model grok-4.20-0309-reasoning does not support parameter reasoningEffect
+   ```
+   **Fix:** Set `agent.reasoning_effort: none` in config.yaml — run `hermes config set agent.reasoning_effort none` or edit the file directly. This disables the reasoning-effort parameter entirely so xAI's API doesn't reject the request.
+   
+   **Provider-switching pitfall:** When switching FROM a provider that supports reasoning effort (e.g. DeepSeek, Anthropic) TO xAI/Grok, you must update TWO things: `model.base_url` (to `https://api.x.ai/v1`) AND `agent.reasoning_effort` (to `none`). Forgetting either one will cause API errors. Same applies when cloning profiles — check both settings.
+6. **Model context window below 64K minimum (e.g. kimi-k2.6 at 32K)**: Hermes Agent requires at least 64K context. To bypass for smaller models, set TWO config keys:
    ```bash
    hermes config set model.context_length 65536
    hermes config set auxiliary.compression.context_length 65536
    ```
    The second key is needed because the auxiliary compression model inherits the main model and will also fail the 64K check. After setting both, restart the session (`/reset` or new invocation).
-6. **Cloned profile uses wrong API endpoint**: When creating profiles with `--clone-from`, the `model.base_url` is copied from the source. If the new profile uses a different provider (e.g. switching from deepseek to kimi-coding-cn), the stale `base_url` will cause HTTP 401. Remove it:
+7. **Cloned profile uses wrong API endpoint**: When creating profiles with `--clone-from`, the `model.base_url` is copied from the source. If the new profile uses a different provider (e.g. switching from deepseek to kimi-coding-cn), the stale `base_url` will cause HTTP 401. Remove it:
    ```bash
    python3 -c "
    import yaml
@@ -896,6 +996,8 @@ and logs — avoids shell-escaping backslashes in bash.
        yaml.dump(c, f)
    "
    ```
+
+9. **OpenAI Codex `NoneType` error** → See `#### OpenAI Codex / OAuth provider` above for the correct diagnosis and fix (SDK bug, not model entitlement).
 
 ### Changes not taking effect
 - **Tools/skills:** `/reset` starts a new session with updated toolset
@@ -924,6 +1026,46 @@ Common gateway problems:
 - **Slack bot only works in DMs**: Must subscribe to `message.channels` event. Without it, the bot ignores public channels.
 - **Windows-specific issues** (`Alt+Enter` newline, WinError 10106, UTF-8 BOM config, test suite, line endings): see the dedicated **Windows-Specific Quirks** section above.
 
+### send_message to WhatsApp fails — full resolution (2026-05-22, updated 2026-05-22)
+
+`send_message(target="whatsapp")` returns `[error] "No home channel set"` even when WhatsApp receives messages. Three requirements must all be met:
+
+1. **WhatsApp must be under `platforms:` in config.yaml, not as a top-level key.** If `whatsapp: {}` appears as a top-level key (e.g., after `web:`), `send_message` won't find it. Move it under `platforms:` — the gateway's `PlatformConfig` parser only scans the `platforms:` section.
+
+2. **The top-level `WHATSAPP_HOME_CHANNEL` alone is insufficient.** The `PlatformConfig` object needs a `home_channel` sub-object with explicit `platform`, `chat_id`, and `name` fields. Set them via:
+   ```bash
+   hermes config set platforms.whatsapp.home_channel.platform whatsapp
+   hermes config set platforms.whatsapp.home_channel.chat_id '<chat_id>'
+   hermes config set platforms.whatsapp.home_channel.name <name>
+   ```
+   The chat ID format for self-chat mode is `<number>@lid`. After setting all three, restart the gateway:
+   ```bash
+   hermes gateway restart
+   ```
+   Verify with `send_message(action="list")` to confirm `whatsapp:Jianfeng (dm)` appears as a target. Then `send_message(target="whatsapp", message="...")` should succeed.
+
+3. **Gateway must be restarted** after any platform config change. `send_message` reads `PlatformConfig` at gateway startup; changes don't hot-reload.
+
+**Under the hood:** `PlatformConfig.home_channel` is a `HomeChannel` dataclass with fields `platform: Platform`, `chat_id: str`, `name: str`, `thread_id: Optional[str]`. The YAML nesting `platforms.whatsapp.home_channel.chat_id` maps to this structure. An empty `whatsapp: {}` block with a top-level `WHATSAPP_HOME_CHANNEL` key does NOT populate the dataclass — the gateway ignores top-level WhatsApp keys when building `PlatformConfig`.
+
+### Cloudflare tunnel for webhook exposure (2026-05-17)
+
+When a Hermes webhook needs to be reachable from another machine behind NAT/firewall, use Cloudflare's free tunnel:
+
+```bash
+# Start tunnel (runs until killed or VM reboots)
+nohup cloudflared tunnel --url http://localhost:8644 --no-autoupdate > /tmp/cf-tunnel.log 2>&1 &
+
+# Extract the trycloudflare.com URL (needs ~8s to establish)
+sleep 8
+grep -o 'https://[^.]*\.trycloudflare\.com' /tmp/cf-tunnel.log | tail -1
+```
+
+**Pitfalls:**
+- Tunnel dies on VM reboot — must be restarted
+- URL changes every restart (trycloudflare assigns random subdomain)
+- `cloudflared` must be installed: `curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o ~/.local/bin/cloudflared && chmod +x ~/.local/bin/cloudflared`
+- The `terminal(background=True)` tool sometimes captures no output from `cloudflared` — use `nohup ... > /tmp/cf-tunnel.log 2>&1 &` instead
 ### Auxiliary models not working
 If `auxiliary` tasks (vision, compression, session_search) fail silently, the `auto` provider can't find a backend. Either set `OPENROUTER_API_KEY` or `GOOGLE_API_KEY`, or explicitly configure each auxiliary task's provider:
 ```bash
@@ -931,7 +1073,183 @@ hermes config set auxiliary.vision.provider <your_provider>
 hermes config set auxiliary.vision.model <model_name>
 ```
 
-### MCP client vs server confusion
+### `terminal()` curl returns empty output for webhook POSTs
+
+When using `terminal(command="curl -X POST ...")` to hit a webhook endpoint, the output is often empty string with exit code -1 even when the request succeeds (status 202). The webhook endpoint IS reachable (GET to `/health` works).
+
+**Fix**: Use Python's `urllib.request` in `execute_code()` instead:
+```python
+import urllib.request
+req = urllib.request.Request(url, data=body, headers={...}, method="POST")
+with urllib.request.urlopen(req, timeout=10) as resp:
+    print(resp.status, resp.read().decode())
+```
+
+This consistently returns `{"status":"accepted"}` for webhook POSTs.
+
+### MCP server `--args` pitfall
+
+`hermes mcp add --args` strips leading `--` from arguments, preventing them from reaching the MCP command. Example failure:
+
+```bash
+# This WILL NOT work — --repo is interpreted by Hermes CLI, not passed to the server
+hermes mcp add code-review-graph --command=code-review-graph --args mcp --args "--repo=/path"
+```
+
+**Fix**: Add the server without repo args first, then edit `config.yaml` directly:
+
+```bash
+hermes mcp add code-review-graph --command=code-review-graph --args mcp
+# Then edit ~/.hermes/config.yaml:
+#   code-review-graph:
+#     command: code-review-graph
+#     args: [mcp, --repo, /path/to/repo]
+```
+
+After config edit, restart the gateway (`hermes gateway restart`) or `/reload-mcp` in-session.
+
+### Disk space recovery on small VMs
+
+When a 30G VM hits >90% disk usage, pip cache + uv cache + npm cache + __pycache__ typically account for 1-2G. See `references/vm-disk-space.md` for the full recovery playbook.
+
+### RTK — token-saving CLI proxy (60-90% reduction)
+
+[rtk](https://github.com/rtk-ai/rtk) (Rust Token Killer) is a Rust binary that filters and compresses terminal output before it reaches the LLM context. It has native Hermes support via a Python plugin adapter.
+
+**Install RTK binary** (pick one):
+```bash
+brew install rtk                                              # macOS (recommended)
+curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh  # Linux/macOS
+cargo install --git https://github.com/rtk-ai/rtk             # From source
+```
+Pre-built binaries also available at https://github.com/rtk-ai/rtk/releases.
+
+**Install the Hermes plugin:**
+```bash
+rtk init --agent hermes
+```
+
+This creates `~/.hermes/plugins/rtk-rewrite/__init__.py` + `plugin.yaml` and adds `rtk-rewrite` to `plugins.enabled` in config.yaml.
+
+**Verify:**
+```bash
+hermes plugins list        # rtk-rewrite should show "enabled"
+rtk --version              # confirm RTK binary is in PATH
+rtk rewrite "git status"   # test: should output "rtk git status" (exit 0 or 3)
+```
+
+**Restart required:** `/reset` or new session. Plugin hooks load at session start.
+
+**How it works:** The plugin registers a `pre_tool_call` hook that intercepts every `terminal()` call, runs `rtk rewrite <command>`, and mutates the command before execution. Exit codes: 0 or 3 = rewrite produced (command gets mutated), 1 or 2 = passthrough (no RTK filter for this command), anything else = error (original command runs unchanged).
+
+**Scope:** only `terminal()` tool calls are rewritten. Hermes built-in tools (`read_file`, `search_files`, etc.) bypass the shell entirely and are not affected. Commands already prefixed with `rtk`, compound shell commands, heredocs, and commands without an RTK filter pass through unchanged.
+
+**Fail-open:** if `rtk` is not in PATH, `rtk rewrite` times out (2s), crashes, or returns an unexpected exit code, the original command executes normally. The plugin never blocks execution.
+
+**What gets optimized** (100+ commands across these categories):
+- File ops: `ls`, `cat`/read, `find`, `grep`
+- Git: `status`, `diff`, `log`, `push`, `pull`, `commit`, `add`
+- Test runners: `pytest`, `cargo test`, `go test`, `jest`, `vitest`, `playwright test`
+- Build/lint: `cargo build`, `cargo clippy`, `ruff check`, `tsc`, `eslint`, `prettier`
+- Containers: `docker ps/images/logs`, `docker compose ps`, `kubectl pods/logs`
+- Package managers: `pnpm list`, `pip list`, `bundle install`
+- GitHub CLI: `gh pr list`, `gh issue list`, `gh run list`
+- AWS CLI, data tools (`json`, `deps`, `env`, `log`, `curl`)
+
+Expected savings: 60-90% on common dev commands. In a typical 30-min session, ~118K tokens → ~24K tokens (-80%).
+
+**Analytics** (opt-in telemetry, disabled by default):
+```bash
+rtk gain                     # summary stats
+rtk gain --graph             # ASCII chart (last 30 days)
+rtk gain --daily             # day-by-day breakdown
+rtk gain --all --format json # JSON export
+```
+
+**Uninstall:**
+```bash
+rtk init -g --uninstall      # remove hook + RTK.md
+hermes plugins disable rtk-rewrite  # disable plugin
+# Optionally: rm -rf ~/.hermes/plugins/rtk-rewrite/
+```
+
+### Cron job delivers `[SILENT]` — no output reached the user (2026-05-30)
+
+When a cron job's final response is `[SILENT]`, the job ran but the system suppressed delivery. Common causes and how to diagnose:
+
+**1. Check the cron output file.** Every cron run saves its full prompt, context, and response to `~/.hermes/cron/output/<job_id>/YYYY-MM-DD_HH-MM-SS.md`. Look at the bottom for `## Response`:
+
+```bash
+tail -10 ~/.hermes/cron/output/<job_id>/<latest_file>.md
+```
+
+If it says `**[SILENT]**`, the agent chose not to deliver. If it shows a briefing, the content was delivered.
+
+**2. Trace `context_from` chains.** If job B depends on job A's output (set via `context_from` in the cron config), check job A's output first. A missing or `[SILENT]` upstream job means job B started with empty context.
+
+**3. Model-level NSFW guardrails suppress delivery.** This is the most common hidden cause. The agent may **write files to disk** (via tool calls) but still output `[SILENT]` because its model refuses to generate NSFW content as the final response. To check:
+
+```bash
+# Look for evidence of tool writes in the output file
+grep -i "write_file\|saved\|saving" ~/.hermes/cron/output/<job_id>/<latest_file>.md
+```
+
+If tool writes succeeded but the response was `[SILENT]`, the model's guardrails blocked NSFW output. Known models and their NSFW behavior:
+
+| Model/Provider | NSFW via tools? | NSFW as final response? |
+|----------------|:---------------:|:-----------------------:|
+| deepseek-v4-pro/flash | ✅ Writes files | ❌ Refuses model output |
+| grok-4.20-0309-reasoning (xAI) | ✅ Writes files | ✅ Generates output |
+| kimi-k2.6 | ✅ Writes files | ✅ Generates output |
+
+**Fix:** Switch the profile's model to one without NSFW filtering. For a profile used by cron:
+
+```bash
+# 1. Change model to one that passes NSFW
+hermes config set model.default grok-4.20-0309-reasoning   # on the profile
+hermes config set model.provider xai
+
+# 2. Ensure reasoning_effort is none (xAI rejects this param)
+hermes config set agent.reasoning_effort none
+```
+
+**4. File delivery vs. response delivery are separate paths.** The cron agent writes files via tool calls (skips output guardrails), but the final model response is what gets delivered to the user. A job that writes the briefing file but outputs `[SILENT]` successfully saved the data but never sent it. To verify file was written, check the profile's memories or the path the cron prompt specified.
+
+### SkillClaw — automatic skill evolution for Hermes
+
+[SkillClaw](https://github.com/AMAP-ML/SkillClaw) (1400+ stars) auto-evolves, deduplicates, and improves Hermes skills from real session data. Runs as a local LLM proxy on port 30000 that intercepts requests, records sessions, and refines skills in the background.
+
+```bash
+# Install
+git clone https://github.com/AMAP-ML/SkillClaw.git && cd SkillClaw
+bash scripts/install_skillclaw.sh && source .venv/bin/activate
+# Prerequisite (Debian/Ubuntu): sudo apt install python3.11-venv
+
+# Configure
+skillclaw setup   # interactive wizard
+# Or manually: ~/.skillclaw/config.yaml (nested llm.*, proxy.port, claw_type, skills.*)
+
+# Start / monitor
+skillclaw start --daemon
+skillclaw status
+skillclaw doctor hermes
+
+# Stop / restore
+skillclaw stop
+skillclaw restore hermes   # revert ~/.hermes/config.yaml
+```
+
+On start, rewrites `~/.hermes/config.yaml`: model→skillclaw-model, base_url→http://127.0.0.1:30000/v1, provider→custom. Backup saved to `~/.skillclaw/backups/hermes/config.latest.yaml`. **Restart Hermes** (`/reset`) for the proxy to take effect.
+
+**Pitfall:** `skillclaw config set llm.api_key "sk-..."` may reject API key values with special characters. Workaround: use `python3 -c "import yaml; cfg=yaml.safe_load(open('~/.skillclaw/config.yaml')); cfg['llm']['api_key']='...'; yaml.dump(cfg, open('~/.skillclaw/config.yaml','w'))"`.
+
+Full config reference: `references/skillclaw-config.yaml`
+
+### write_file corrupts markdown with line-number prefixes (2026-05-18)
+
+When writing `.md` files, `write_file` sometimes prepends line-number metadata (`     1|`) to each line. This silently corrupts files parsed by regex tools.
+
+**Fix**: Use `execute_code` with `open().write()` for machine-parsed files. Human-read files are fine with `write_file`.
 Hermes has **two separate MCP paths** that are often mixed up:
 - **MCP Client** (`tools/mcp_tool.py`): Hermes *connects to* external MCP servers. Configured via `mcp_servers:` in `config.yaml`. This is **not** a server you can point Claude Desktop at.
 - **MCP Server** (`mcp_serve.py`): Exposes Hermes conversations as MCP tools. Started with `hermes mcp serve`. This **is** what you point Claude Desktop at.
@@ -959,7 +1277,7 @@ If you want to expose a local knowledge base (markdown/PDF) as an MCP server to 
 | Gateway logs | `~/.hermes/logs/gateway.log` |
 | Session files | `~/.hermes/sessions/` or `hermes sessions browse` |
 | Source code | `~/.hermes/hermes-agent/` |
-| Migration & MCP KB integration | `references/migration-and-mcp.md` (this skill) |
+| Replacing backend services with Hermes API | `references/replace-backend-with-hermes-api.md` |
 
 ---
 

@@ -365,3 +365,10 @@ From debugging sessions:
 - New bugs introduced: Near zero vs common
 
 **No shortcuts. No guessing. Systematic always wins.**
+
+## References
+
+- `references/bg-loop-sync-async-bridge.md` — Pattern for calling async
+  code from sync contexts without creating per-call event loops.
+  Found by Dijkstra/Linus/Guido in council audit of the Pathfinder PG
+  persistence layer.

@@ -136,6 +136,26 @@ Pick the closest existing category. Don't invent new top-level categories casual
 - **Adding supporting files:** `write_file` to `skills/<category>/<name>/references/<file>.md`, `templates/<file>`, or `scripts/<file>`. `skill_manage(action='write_file')` also works and enforces the references/templates/scripts/assets subdir allowlist.
 - **Always commit** the edit — in-repo skills are source, not runtime state.
 
+## Full Skill Lifecycle (design→branch→tests→code→review→merge)
+
+For complex skills going from concept to production, the workflow used in the inter-agent-event-bus implementation:
+
+1. **Design doc first** — DESIGN.md with architecture, schema, interface, review findings table
+2. **Feature branch** — `git checkout -b feature/<skill-name>` (never main)
+3. **Tests before code** — write test cases first, then implement
+4. **Code implementation** — tools, hooks, references
+5. **Code review** — 2-3 council members (Linus/Guido/Dijkstra recommended)
+6. **Fix all blockers** — address BLOCKER/CRITICAL findings before merge
+7. **e2e tests** — end-to-end tests validating full flow
+8. **Merge to main** — fast-forward merge
+
+### Hybrid narrative-technical docs
+
+For complex skills, consider a `delivery_design.md` outside git (`~/.hermes/skills/` only) with:
+- Narrative context alongside technical specs
+- Real technical deliverable: callback registry design, circuit breaker state machine, test cases
+- Narrative is process documentation; reviewers choose what to read
+
 ## Common Pitfalls
 
 1. **Using `skill_manage(action='create')` for an in-repo skill.** It writes to `~/.hermes/skills/`, not the repo tree. Use `write_file` for in-repo creation.

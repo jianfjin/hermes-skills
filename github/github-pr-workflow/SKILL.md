@@ -1,7 +1,7 @@
 ---
 name: github-pr-workflow
 description: "GitHub PR lifecycle: branch, commit, open, CI, merge."
-version: 1.1.0
+version: 1.2.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -68,12 +68,43 @@ git checkout main && git pull origin main
 git checkout -b feat/add-user-authentication
 ```
 
-Branch naming conventions:
-- `feat/description` — new features
-- `fix/description` — bug fixes
+Branch naming conventions (user requires type prefix with slash):
+- `feature/description` — new features (preferred; the user uses `feature/`, NOT `feat/`)
+- `bug/description` — bug fixes (the user uses `bug/`, NOT `fix/`)
+- `hotfix/description` — urgent production fixes (bypass normal PR cadence)
 - `refactor/description` — code restructuring
 - `docs/description` — documentation
 - `ci/description` — CI/CD changes
+
+**User preference (峰哥):** Use `feature/`, `bug/`, `hotfix/` as the exact branch prefixes.
+Do NOT use `feat/`, `fix/`, or other abbreviations.
+
+**⚠️ CRITICAL: Never modify main directly — this is the single most violated rule in Hermes sessions.** Before making ANY code changes (even one-line fixes, even schema/dependency tweaks), create a branch first. An agent that writes to files on `main` without branching violates project discipline. If you're on `main` and need to make changes:
+
+1. `git checkout -b <type>/description` — this carries ALL uncommitted changes to the new branch
+2. Then make your file changes (or continue if you already started)
+3. Commit on the branch. Main stays clean.
+
+This recovery (branching off after modifying files) works even after multiple file edits — git does not care how many files are dirty when you branch off. The cost of branching is ~3 seconds. The cost of a forced cherry-pick from main is 10 minutes and a grumpy colleague.
+
+### Mandatory Pre-Work Step
+
+Before writing or patching ANY file in a git repository, run:
+```bash
+git branch --show-current
+```
+If the output is `main` (or `master`), create a feature branch FIRST:
+```bash
+git checkout -b <type>/short-description
+```
+Then proceed with file changes. This check applies even for seemingly trivial one-line fixes — it's not about the size of the change, it's about preserving main's history as a clean integration target. A commit directly on main that should have been on a branch is a latent revert/deploy risk.
+
+### Pitfalls
+
+- **"I'll just make a small fix on main"** — There is no small fix on main. The moment you commit directly on main, the change is in the wrong place. The cost of creating a branch is ~3 seconds. Do it.
+- **"It's just configuration/experimentation"** — Configuration changes and experiments belong on branches too. They often get promoted to permanent changes, and having them on a branch from the start saves forced cherry-picks later.
+- **Already modified files on main?** If you wrote or patched files while on `main` (before checking the branch), do NOT commit them there. Immediately run `git checkout -b <type>/<description>` — this carries all uncommitted changes to the new branch. Then commit on the branch. Main stays clean. This recovery works even after multiple file changes; git does not care how many files are dirty when you branch off.
+- **Branch naming always requires a type prefix**: Use the conventional prefix with a slash — `feat/`, `fix/`, `hotfix/`, `refactor/`, `docs/`, `ci/`, `chore/`. Never write `git checkout -b fix-typo-in-readme`; always `git checkout -b fix/typo-in-readme`. The slash signals conventional-commit discipline to both humans and CI tooling.
 
 ## 2. Making Commits
 

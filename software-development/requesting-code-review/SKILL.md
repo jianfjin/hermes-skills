@@ -30,6 +30,44 @@ quality gates, an independent reviewer subagent, and an auto-fix loop.
 **This skill vs github-code-review:** This skill verifies YOUR changes before committing.
 `github-code-review` reviews OTHER people's PRs on GitHub with inline comments.
 
+## Prerequisite: Docs-First Workflow
+
+**Before writing ANY code, write the documentation first:**
+
+1. Write a design doc, spec, or architecture overview
+2. Have at least one agent review the docs independently
+3. Only AFTER docs review passes, create your feature branch and write code
+
+This applies to all non-trivial code changes (>50 lines or >1 file).
+Skip only for trivial one-liner fixes (`s/foo/bar/g` type changes).
+
+This workflow is defined in detail in the `subagent-driven-development` skill
+("Docs-First Workflow" section). This skill picks up after docs are approved
+and code is ready to commit.
+
+## Prerequisite: Branching Workflow
+
+**NEVER commit or modify `main` directly.** Before making any code change:
+
+1. **Create a branch from `main`** with a proper prefix:
+   ```bash
+   git checkout -b feature/<short-description>   # new feature
+   git checkout -b bug/<short-description>       # bug fix
+   git checkout -b hotfix/<short-description>    # urgent production fix
+   ```
+
+2. **If you already made changes on `main`**, immediately:
+   ```bash
+   git checkout -b feature/<temp-name>   # move changes to a branch
+   git checkout main                     # back to clean main
+   ```
+
+3. **Work exclusively on the feature branch.** Commit, push, and open PRs from
+   the branch. Merge to `main` only through PR or explicit user instruction.
+
+4. **Keep `main` clean** — it should always reflect the last known-good state.
+   Before switching to a new task, ensure `main` has no uncommitted changes.
+
 ## Step 1 — Get the diff
 
 ```bash
@@ -268,7 +306,53 @@ tests exist, tests pass, no regressions.
 
 **writing-plans:** Validates implementation matches the plan requirements.
 
-## Pitfalls
+## Step 9 — Council Review Before Merge (Mandatory Gate)
+
+After Step 8 commit, the branch is ready for council review. **Do NOT merge
+to `main` until council approves.**
+
+**This is a mandatory gate.** The user will not accept direct-to-main merges.
+
+### Select 2-3 council seats
+
+| File Type | Suggested Reviewers | Model |
+|-----------|-------------------|-------|
+| Architecture, system design | Linus (Arch) | deepseek-v4-pro |
+| Python API, typed, imports | Guido (CLA) | kimi-k2.6 |
+| Engineering, app code | Xiaolong (Eng) | deepseek-v4-pro |
+| Product, UX (if UI involved) | Jobs (CPO) | kimi-k2.6 |
+| Correctness, concurrency | Dijkstra (CSO) | kimi-k2.6 |
+| Biology/chemistry domain (BioChem) | Demi (CCT) | deepseek-v4-flash |
+
+### Write review brief
+
+Include: what files changed, why, key design decisions, and specific review
+questions per seat. Save to `/tmp/review-<topic>-brief.txt`.
+
+### Launch reviews in parallel
+
+```python
+terminal(command="linus chat -q '$(cat /tmp/review-<topic>-brief.txt)'",
+         background=True, notify_on_complete=True, timeout=300)
+terminal(command="guido chat -q '$(cat /tmp/review-<topic>-brief.txt)'",
+         background=True, notify_on_complete=True, timeout=300)
+```
+
+### Process findings
+
+- Each reviewer returns APPROVE / REJECT / CONDITIONAL_APPROVE
+- REJECT or CONDITIONAL_APPROVE → fix findings → re-review
+- Only after ALL seats APPROVE → merge to main
+
+### Merge
+
+```bash
+git checkout main
+git merge <branch-name>
+git push origin main
+```
+
+## Pitfalls (additional)
 
 - **Empty diff** — check `git status`, tell user nothing to verify
 - **Not a git repo** — skip and tell user
@@ -278,3 +362,7 @@ tests exist, tests pass, no regressions.
 - **No test framework found** — skip regression check, reviewer verdict still runs
 - **Lint tools not installed** — skip that check silently, don't fail
 - **Auto-fix introduces new issues** — counts as a new failure, cycle continues
+- **Tests that silently pass without executing** — Common cause: `pytest.mark.asyncio(coro)` as bare expression vs `@pytest.mark.asyncio` decorator. The test loads silently, collects 0 tests, reports "passed". **Always verify tests execute**: `python3 -m pytest tests/ -v --collect-only | grep collected`
+- **Optional-dependency modules blocking test discovery** — When a module uses `TYPE_CHECKING` for optional imports, tests must bypass the package's `__init__.py` chain. Use `importlib.spec_from_file_location()` to load the module directly from source, or guard with `@unittest.skipIf(not HAS_DEP)`. Never let optional imports prevent test collection.
+- **Skipping review when user is in a hurry** — The user requires "docs first → agent review → code". Skipping creates rework. If user says "just commit", push back gently: "Quick review first per our workflow — 30 seconds."
+- **Branch-first enforcement** — Before any code change: `git branch --show-current`. If `main`, create a branch immediately. This check is mandatory even for one-line fixes.

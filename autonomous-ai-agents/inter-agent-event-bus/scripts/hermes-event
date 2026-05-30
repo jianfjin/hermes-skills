@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""hermes-event — CLI for inter-agent event bus (Phase 1 v2).
+
+Usage:
+  hermes-event publish <event_type> <payload_json> [--source <agent>] [--ttl <sec>]
+  hermes-event subscribe <pattern> <consumer_id> [--max <N>] [--block <sec>]
+  hermes-event status
+  hermes-event health
+  hermes-event listen <pattern> <consumer_id> [--max <N>]  # alias for subscribe
+
+Examples:
+  hermes-event publish "feifei:gradient" '{"loss":0.023}' --source feifei
+  hermes-event subscribe "feifei:*" xuefeng --max 5
+  hermes-event status
+"""
+
+import json
+import os
+import sys
+
+SKILL_DIR = os.path.expanduser("~/.hermes/skills/autonomous-ai-agents/inter-agent-event-bus")
+TOOLS_DIR = os.path.join(SKILL_DIR, "tools")
+sys.path.insert(0, TOOLS_DIR)
+
+from publish_event import publish_event
+from subscribe_events import subscribe_events
+from observability import health_check
+from nfs_check import check_filesystem_type
+from connection import EventBusWriter
+from event_schema_v2 import run_migrations, SCHEMA_VERSION
+
+DB_PATH = os.environ.get("EVENT_BUS_DB_PATH",
+    os.path.join(os.path.expanduser("~"), ".hermes", "shared", "event_bus.db"))
+
+
+def ensure_db():
+    """Auto-init DB with schema migrations if needed."""
+    w = EventBusWriter(DB_PATH)
+    if w.conn is None:
+        w.connect()
+    row = w.conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_version'").fetchone()
+    if row[0] == 0:
+        run_migrations(w)
+        print(f"[init] Schema v{SCHEMA_VERSION} applied to {DB_PATH}", file=sys.stderr)
+    else:
+        cur_ver = w.conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] or 0
+        if cur_ver < SCHEMA_VERSION:
+            run_migrations(w)
+            print(f"[init] Schema migrated v{cur_ver}→v{SCHEMA_VERSION}", file=sys.stderr)
+    # Check if old events table has correct columns (v1→v2 migration)
+    try:
+        col = w.conn.execute("PRAGMA table_info(events)").fetchall()
+        col_names = [c[1] for c in col]
+        if 'source_agent' not in col_names:
+            # Old v1 schema — need to migrate
+            w.conn.execute("ALTER TABLE events RENAME TO events_v1_legacy")
+            w.conn.execute("""CREATE TABLE events (
+                event_id INTEGER PRIMARY KEY, source_agent TEXT NOT NULL,
+                event_type TEXT NOT NULL, payload TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','processed','dead','archived')),
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                processed_at TEXT, retry_count INTEGER NOT NULL DEFAULT 0,
+                max_retries INTEGER NOT NULL DEFAULT 3, error_message TEXT,
+                ttl_seconds INTEGER DEFAULT 86400)""")
+            try:
+                w.conn.execute("""INSERT INTO events(event_id, source_agent, event_type, payload, status, created_at, ttl_seconds)
+                    SELECT rowid, publisher, topic, payload, 'pending', datetime(created_at, 'unixepoch'), ttl_seconds
+                    FROM events_v1_legacy""")
+                w.conn.execute("DROP TABLE events_v1_legacy")
+                print(f"[migrate] v1→v2 events table migrated", file=sys.stderr)
+            except Exception as e:
+                print(f"[migrate] v1 data migration failed (non-fatal): {e}", file=sys.stderr)
+            w.conn.commit()
+    except Exception:
+        pass
+
+
+def cmd_publish(args):
+    """publish <event_type> <payload_json> [--source <agent>] [--ttl <sec>]"""
+    ensure_db()
+    if len(args) < 2:
+        print("Usage: hermes-event publish <event_type> <payload_json> [--source <agent>] [--ttl <sec>]", file=sys.stderr)
+        sys.exit(1)
+    event_type = args[0]
+    payload = json.loads(args[1])
+    source = _get_flag(args, "--source", "unknown")
+    ttl = int(_get_flag(args, "--ttl", "86400"))
+    result = publish_event(event_type=event_type, payload=payload, source_agent=source, ttl_seconds=ttl)
+    print(json.dumps(result, indent=2))
+
+
+def cmd_subscribe(args):
+    """subscribe <pattern> <consumer_id> [--max <N>] [--block <sec>]"""
+    ensure_db()
+    if len(args) < 2:
+        print("Usage: hermes-event subscribe <pattern> <consumer_id> [--max <N>] [--block <sec>]", file=sys.stderr)
+        sys.exit(1)
+    pattern = args[0]
+    consumer = args[1]
+    max_n = int(_get_flag(args, "--max", "10"))
+    block = int(_get_flag(args, "--block", "0"))
+    events = subscribe_events(event_type_pattern=pattern, consumer_id=consumer, max_events=max_n, block_seconds=block)
+    if events:
+        print(f"→ {len(events)} event(s) for {consumer} matching '{pattern}':")
+    else:
+        print(f"→ 0 new events for {consumer} matching '{pattern}'")
+    for e in events:
+        print(f"  [{e['event_id']}] {e['event_type']} from {e['source_agent']} — {e['payload']}")
+
+
+def cmd_status(args):
+    """Print bus status"""
+    ensure_db()
+    from event_bus_status import event_bus_status
+    status = event_bus_status()
+    print(f"Database:      {status.get('db_path', DB_PATH)}")
+    print(f"Total events:  {status.get('total_events', '?')}")
+    print(f"Active cursors:{status.get('active_cursors', '?')}")
+    topics = status.get("topic_histogram", {})
+    if topics:
+        print(f"Topics:")
+        for t, c in sorted(topics.items(), key=lambda x: -x[1]):
+            print(f"  {t}: {c}")
+
+
+def cmd_health(args):
+    """Print health check"""
+    ensure_db()
+    hc = health_check(DB_PATH)
+    print(f"Status:     {hc['status']}")
+    for k, v in hc.get("checks", {}).items():
+        print(f"  {k}: {v}")
+
+
+def _get_flag(args, flag, default=None):
+    for i, a in enumerate(args):
+        if a == flag and i + 1 < len(args):
+            return args[i + 1]
+    return default
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+        print(__doc__)
+        sys.exit(0)
+
+    cmd = sys.argv[1]
+    cmd_args = sys.argv[2:]
+
+    dispatch = {
+        "publish": cmd_publish,
+        "sub": cmd_subscribe,
+        "subscribe": cmd_subscribe,
+        "listen": cmd_subscribe,
+        "read": cmd_subscribe,
+        "status": cmd_status,
+        "health": cmd_health,
+    }
+
+    if cmd in dispatch:
+        dispatch[cmd](cmd_args)
+    else:
+        print(f"Unknown command: {cmd}", file=sys.stderr)
+        print(__doc__, file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

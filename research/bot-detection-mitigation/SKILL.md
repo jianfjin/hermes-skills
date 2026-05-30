@@ -14,6 +14,23 @@ This skill outlines strategies for interacting with websites that employ aggress
 
 ## Proven Workflows & Workarounds
 
+### 0. Pre-Flight: Check for Official APIs FIRST (2026-05-22)
+**Before reaching for anti-bot circumvention tools (CloakBrowser, Playwright stealth, etc.), check if the target has an official API.** Many scientific and regulatory data sources have stable, well-documented REST APIs that don't require bot circumvention at all:
+
+| Source | Official API | Status |
+|--------|-------------|--------|
+| PubMed | Entrez EUtils (eutils.ncbi.nlm.nih.gov) | Free, rate-limited, no API key needed for basic use |
+| ChEMBL | REST API (ebi.ac.uk/chembl/api/data) | Free, stable 10+ years |
+| ClinicalTrials.gov | REST API (clinicaltrials.gov/api) | Free |
+| UniProt | REST API (rest.uniprot.org) | Free |
+| PDB | REST API (data.rcsb.org) | Free |
+| EUR-Lex | Static documents + SPARQL endpoint | No crawling needed for small datasets |
+| WHO ATC | Static published tables | Manual download |
+
+**Council ruling (2026-05-22, 4/0):** For pharm_platform demo, CloakBrowser was unanimously rejected because all target data sources had official APIs. CloakBrowser would have added 60% failure risk (Playwright download issues, Cloudflare blocks) for zero benefit. Reserve anti-bot tools for sources that actively block automated access (national medicine registries, certain pharma company portals) — and even then, try the API first.
+
+**Rule:** Step 0 of any data-gathering task is a 30-second check: "Does this source have a public API?" If yes, use it. If no, proceed to Step 1 below.
+
 ### 1. Detection Identification
 If a page title contains "Just a moment..." or the body mentions "checking that your connection is secure," the site is using a challenge-response system (like Cloudflare or Akamai) that often blocks headless browsers.
 
