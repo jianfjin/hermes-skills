@@ -356,6 +356,15 @@ Disable sampling for untrusted servers with `sampling: { enabled: false }`.
 - Server connections are persistent and shared across all conversations in the same agent process
 - Adding or removing servers requires restarting the agent (no hot-reload currently)
 
+### MCP Server Development
+
+If you are building an MCP server (not consuming one), see `references/mcp-server-development.md` for:
+
+- The critical `tools/list` response format — must wrap tools in `{"tools": [...]}` not a bare array
+- Connection lifecycle (initialize → initialized → tools/list → tools/call → EOF)
+- Environment isolation pitfalls (profile `$HOME` redirection)
+- Minimal viable server template
+
 ### Client vs Server pitfall
 
 This skill covers Hermes as an **MCP client** (it calls external servers). Do **not**

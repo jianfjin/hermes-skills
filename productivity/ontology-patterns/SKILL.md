@@ -157,6 +157,68 @@ Single client, pre-revenue → Tech lead does workshops. No FDE hire.
 Enterprise scale → Consider full FDE embed (but this is Palantir money).
 ```
 
+### Pattern 5: Schema Migration Layer (Mock→Real Data Transition)
+
+**Problem**: Mock data uses specific field names. When real consortium data arrives (WP2 from CHARITE, WP3 from Epidata), field names will differ. The adapter hardcodes mock field names (`n["node_id"]`), causing KeyError on first contact with real data.
+
+**Council consensus** (2026-05-20, 5 seats: Guido/Linus/Dijkstra/Musk/Xuefeng): Build a **version-aware normalize layer** in the adapter, not a full architecture.
+
+**Cost**: 0.3 person-days (€175). **Timing**: Now (during mock data phase), before M3 data contracts arrive. Xuefeng's risk model: waiting = 70%+ probability of M3 demo crash.
+
+**Solution**: Python dict-based normalizers with explicit, exhaustive field-name mappings:
+
+```python
+# pathfinder/adapters/upstream.py — single file change
+_WP3_NODE_NORMALIZERS = {
+    "v1": {"node_id": "node_id", "label": "label", ...},         # identity passthrough
+    "epidata_v1": {"id": "node_id", "title": "label",            # real schema
+                    "level": "maturity_level", "applicable_to": "stakeholder_types"},
+}
+
+def _normalize_record(raw: dict, mapping: dict, version: str, label: str) -> dict:
+    """Translate raw field names to canonical names. Dijkstra I4: unknown fields logged."""
+    normalized = {}
+    for raw_key, raw_value in raw.items():
+        canonical = mapping.get(raw_key)
+        if canonical is not None:
+            normalized[canonical] = raw_value
+        else:
+            logger.warning("Schema drift [%s v%s]: unknown field %r", label, version, raw_key)
+            normalized[raw_key] = raw_value
+    return normalized
+
+def _resolve_normalizer(normalizers, version, label):
+    """Version dispatch. Unknown version → ValueError at startup (fail fast)."""
+    version = version or "v1"
+    if version not in normalizers:
+        raise UpstreamClientError(f"Unsupported schema version: {version!r}")
+    return normalizers[version]
+```
+
+**Key design rules** (per Guido + Dijkstra):
+- Mapping table is **explicit and exhaustive** — no fuzzy matching, no guesswork
+- Unknown fields → WARNING log, value kept as-is (don't silently drop)
+- Unknown version → ValueError at startup (fail fast)
+- Cardinality not a concern — adapter doesn't care about record count (Musk)
+- M3 transition: add new version dict entry, 10 minutes
+
+**Failure matrix coverage**:
+
+| Schema Change | Handled By |
+|--------------|------------|
+| Field rename | Normalize mapping |
+| New field added | Passthrough (mapping.get returns None → kept as-is) |
+| Field removed | I1 check: "missing canonical fields" WARNING |
+| Type change | `import_wp*` validation gate (separate layer) |
+| Nested structure change | Recursive normalize call per substructure |
+
+**When NOT to use**:
+- If you already have the real schema → code directly to real fields
+- If you have >5 schema versions → switch to versioned dataclass deserializers
+- If the data comes from a versioned OpenAPI spec → use the spec as source of truth
+
+**Reference**: `references/schema-drift-council-debate-2026-05-20.md` — full council debate record, implementation details, test coverage.
+
 ## When NOT to Apply These Patterns
 
 - **Don't ontology-wash a CRUD app**: If your system has 3 entities and no graph, YAGNI.

@@ -1,6 +1,4 @@
-# Council Expansion Checklist
-
-Step-by-step for adding new seats to the Nine-Dragon Council.
+# Council Expansion Checklist (2026-05-21 verified, 15-seat)
 
 ## 1. Create Profile
 
@@ -10,49 +8,43 @@ hermes profile create <name> --clone-from default
 
 ## 2. Configure Model
 
+**Kimi-2.6 seats** (Fei-Fei, Andrew, Andrej, Musk, Jobs, Guido, Dijkstra):
 ```bash
-# For kimi-k2.6 seats (must set context_length override):
 <name> config set model.default kimi-k2.6
 <name> config set model.provider kimi-coding-cn
 <name> config set model.context_length 65536
 <name> config set auxiliary.compression.context_length 65536
+```
 
-# For deepseek-v4-flash seats:
+**DeepSeek flash seats** (Demi, Lisa, Sam, Jensen, Xuefeng):
+```bash
 <name> config set model.default deepseek-v4-flash
-<name> config set model.provider deepseek
-
-# For deepseek-v4-pro seats:
-<name> config set model.default deepseek-v4-pro
 <name> config set model.provider deepseek
 ```
 
-## 3. Remove Stale base_url
+## 3. Fix Clone Artifacts
 
---clone-from copies the source profile's `model.base_url`. Delete the line from
-`~/.hermes/profiles/<name>/config.yaml` if the provider changed:
+```bash
+# Remove stale base_url from --clone-from
+sed -i '/base_url:/d' ~/.hermes/profiles/<name>/config.yaml
 
-```yaml
-model:
-  default: kimi-k2.6
-  provider: kimi-coding-cn
-  base_url: https://api.deepseek.com/v1  # ← DELETE THIS LINE
-  context_length: 65536
+# Fix custom_providers: must be list, not dict (causes startup error)
+python3 -c "
+import yaml
+with open('~/.hermes/profiles/<name>/config.yaml') as f:
+    cfg = yaml.safe_load(f)
+if isinstance(cfg.get('custom_providers'), dict):
+    cfg['custom_providers'] = []
+    with open('~/.hermes/profiles/<name>/config.yaml', 'w') as f:
+        yaml.dump(cfg, f)
+"
 ```
 
 ## 4. Write SOUL.md
 
-Key sections to include:
-- Identity & background (birth, key achievements, current role)
-- Core philosophy / beliefs (the "soul")
-- Role in the council (specific responsibilities)
-- Communication style (tone, quirks, catchphrases)
-- Quotes to draw from
-- Council output format tag: `[Name/ROLE]`
-
-**Language rule:**
-- Non-Chinese members (Musk, Jobs, Linus, Guido, Dijkstra, Jensen): English SOUL.md
-- Chinese members (Xuefeng, Xiaolong): Chinese SOUL.md
-- Feng Ge (default profile): no separate SOUL.md, persona in main session
+Rich persona with: identity, philosophy, role, communication style.
+English for non-Chinese seats. Chinese for Chinese seats.
+Backup to `council_profiles/<name>_SOUL.md` in the project repo.
 
 ## 5. Smoke Test
 
@@ -60,27 +52,38 @@ Key sections to include:
 <name> chat -q "Who are you? One sentence."
 ```
 
-Verify: correct persona voice, correct output format tag, correct language.
+## 6. Update Skill & Memory
 
-## 6. Update Skill
+- Patch inner-circle-debate roster (15 seats)
+- Update memory council entry
+- Push to hermes-skills repo
 
-Patch `inner-circle-debate/SKILL.md`:
-- Roster table (add row)
-- Roles & Responsibilities table (add row)
-- Setup section (add create/configure commands)
-- Debate modes (update participant lists)
-
-## 7. Update Memory
-
-Add to the 9-seat roster memory entry with a compressed one-liner.
-
-## 8. Backup SOUL.md
+## 7. Backup SOUL.md
 
 ```bash
 cp ~/.hermes/profiles/<name>/SOUL.md ~/projects/<project>/council_profiles/<name>_SOUL.md
 ```
 
+## 15-Seat Roster (2026-05-21)
+
+| Seat | Name | Code | Model | Lang |
+|------|------|------|-------|------|
+| CTO | Feng Ge | fengge | pro | CN |
+| CVO | Elon Musk | musk | kimi-k2.6 | EN |
+| CSA | Zhang Xuefeng | xuefeng | flash | CN |
+| Arch | Linus Torvalds | linus | pro | EN |
+| Eng | Zhang Xiaolong | xiaolong | pro | CN |
+| CPO | Steve Jobs | steve | kimi-k2.6 | EN |
+| CLA | Guido van Rossum | guido | kimi-k2.6 | EN |
+| CSO | Edsger Dijkstra | dijkstra | kimi-k2.6 | EN |
+| CIO | Jensen Huang | jensen | flash | EN |
+| CAS | Fei-Fei Li | feifei | kimi-k2.6 | EN |
+| CCT | Demi Guo | demi | flash | EN |
+| CHO | Lisa Su | lisasu | flash | EN |
+| CLO | Andrew Ng | andrew | kimi-k2.6 | EN |
+| CRO | Andrej Karpathy | andrej | kimi-k2.6 | EN |
+| CPSO | Sam Altman | sam | flash | EN |
+
 ## Profile Aliases
 
-Profiles are accessible via wrapper scripts at `~/.local/bin/<name>`.
-Use `<name> chat` or `hermes --profile <name>`.
+Profiles accessible via `~/.local/bin/<name>`. Use `<name> chat` or `hermes --profile <name>`.

@@ -131,6 +131,16 @@ git commit -m "feat: add specific feature"
 
 ## Writing Process
 
+### Step 0: Write Docs First (User Requirement: 峰哥)
+
+Before writing ANY code, write the documentation first:
+
+1. **Write documentation plan**: Architecture overview, API specs, data flow, decision process
+2. **Have an agent review the docs**: Dispatch a review subagent to verify completeness and accuracy
+3. **Only after docs are approved**: Proceed to code implementation
+
+This is NOT optional. The user explicitly requires this workflow for all changes.
+
 ### Step 1: Understand Requirements
 
 Read and understand:

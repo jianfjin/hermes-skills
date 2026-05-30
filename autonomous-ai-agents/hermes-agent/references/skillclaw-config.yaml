@@ -1,0 +1,61 @@
+# SkillClaw config.yaml reference
+
+Minimal configuration for Hermes + DeepSeek, stored at `~/.skillclaw/config.yaml`.
+
+```yaml
+# LLM forwarding (where SkillClaw sends proxied requests)
+llm:
+  provider: custom
+  api_base: https://api.deepseek.com/v1
+  api_key: sk-xxxxxxxxxxxxxxxx
+  model_id: deepseek-v4-pro
+
+# Local proxy
+proxy:
+  port: 30000
+  host: 0.0.0.0
+
+# Agent integration
+claw_type: hermes
+
+# Skills (SkillClaw manages these, syncs with ~/.hermes/skills)
+skills:
+  enabled: true
+  dir: /home/user/.skillclaw/skills
+  public_root: /home/user/.hermes/skills
+
+# Session recording
+record:
+  enabled: true
+  dir: /home/user/.skillclaw/records
+
+# PRM (disabled — enable if you want reward-model scoring of evolved skills)
+prm:
+  enabled: false
+```
+
+## Key behaviors
+
+- `claw_type: hermes` — tells SkillClaw to auto-configure Hermes on startup (rewrite config.yaml)
+- `skills.public_root` — points to Hermes' skills directory for bidirectional sync
+- `record.enabled` — stores session data for skill evolution (consumed by evolve server)
+- SkillClaw backs up Hermes config before rewriting: `~/.skillclaw/backups/hermes/config.latest.yaml`
+- SkillClaw does NOT modify `~/.hermes/.env` — API keys stay in place
+
+## Provider options
+
+| Provider | api_base | model_id (example) |
+|----------|----------|-------------------|
+| DeepSeek | https://api.deepseek.com/v1 | deepseek-v4-pro |
+| OpenAI | https://api.openai.com/v1 | gpt-4o |
+| Kimi | https://api.moonshot.cn/v1 | moonshotai/Kimi-K2.5 |
+| OpenRouter | https://openrouter.ai/api/v1 | google/gemini-2.5-pro |
+| Qwen/DashScope | https://dashscope.aliyuncs.com/compatible-mode/v1 | qwen-plus |
+
+## Troubleshooting
+
+- `skillclaw config show` — displays current config
+- `skillclaw doctor hermes` — checks Hermes integration health
+- If `skillclaw start` fails: check `~/.skillclaw/config.yaml` exists and is valid YAML
+- If `skillclaw config set` rejects values: write directly to the YAML file
+- To revert Hermes: `skillclaw restore hermes` restores config.yaml from backup

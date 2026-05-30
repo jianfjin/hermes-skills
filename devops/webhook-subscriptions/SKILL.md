@@ -192,6 +192,46 @@ Requires `--deliver` to be a real target (telegram, discord, slack, github_comme
 3. When a POST arrives matching a route, the adapter formats the prompt and triggers an agent run
 4. The agent's response is delivered to the configured target (Telegram, Discord, GitHub comment, etc.)
 
+## Common Patterns (continued)
+
+### Inter-Agent Communication (Hermes ↔ Hermes)
+
+Use webhooks to let two Hermes instances trigger each other. One agent creates a subscription; the other POSTs to it.
+
+**Agent A (receiver):**
+```bash
+hermes webhook subscribe agent-bridge \
+  --prompt "来自Agent B的消息：{message}" \
+  --deliver whatsapp \
+  --deliver-chat-id "YOUR_CHAT_ID"
+```
+
+**Agent B (sender) — POST with HMAC:**
+```python
+import hmac, hashlib, json, urllib.request
+
+HMAC_KEY = "shared-secret"
+body = json.dumps({"message": "hello"}).encode()
+sig = hmac.new(HMAC_KEY.encode(), body, hashlib.sha256).hexdigest()
+
+req = urllib.request.Request(
+    "https://tunnel-url/webhooks/agent-bridge",
+    data=body, method="POST",
+    headers={
+        "Content-Type": "application/json",
+        "X-Hub-Signature-256": f"sha256={sig}"
+    }
+)
+with urllib.request.urlopen(req, timeout=10) as resp:
+    print(resp.status, resp.read().decode())
+```
+
+**Pitfall**: `terminal(curl -X POST ...)` frequently returns empty output for webhook POSTs — use `execute_code` with `urllib.request` instead.
+
+**Bidirectional communication**: Webhooks are one-way by default. For bidirectional agent-to-agent communication, both machines need webhook subscriptions AND exposed endpoints. See the `hermes-bidirectional-bridge` skill for a pure-SSH solution (no Cloudflare) that works on both GCP VMs and local machines behind NAT.
+
+Both sides need webhooks enabled + public reachability (see Cloudflare Tunnel below).
+
 ## Troubleshooting
 
 If webhooks aren't working:
@@ -199,6 +239,20 @@ If webhooks aren't working:
 1. **Is the gateway running?** Check with `systemctl --user status hermes-gateway` or `ps aux | grep gateway`
 2. **Is the webhook server listening?** `curl http://localhost:8644/health` should return `{"status": "ok"}`
 3. **Check gateway logs:** `grep webhook ~/.hermes/logs/gateway.log | tail -20`
-4. **Signature mismatch?** Verify the secret in your service matches the one from `hermes webhook list`. GitHub sends `X-Hub-Signature-256`, GitLab sends `X-Gitlab-Token`.
-5. **Firewall/NAT?** The webhook URL must be reachable from the service. For local development, use a tunnel (ngrok, cloudflared).
+4. **Signature mismatch?** Verify the secret in your service matches the one from `hermes webhook list`. GitHub sends `X-Hub-Signature-256`, GitLab sends `X-Gitlab-Token`. For raw HMAC-SHA256 signing, see `references/hmac-test-curl.sh`.
+5. **Firewall/NAT?** The webhook URL must be reachable from the service. For local development or cloud VMs behind firewalls (GCP, AWS), use a Cloudflare tunnel:
+   ```bash
+   # Ephemeral tunnel (no account needed, URL changes on restart):
+   cloudflared tunnel --url http://localhost:8644 --no-autoupdate
+   # Then extract the trycloudflare.com URL from stderr output.
+   ```
+   See the `cloudflare-tunnel-static-deploy` skill for persistent named tunnels.
 6. **Wrong event type?** Check `--events` filter matches what the service sends. Use `hermes webhook test <name>` to verify the route works.
+
+### Pitfall: Gateway restart hangs with active agents
+
+`hermes gateway restart` drains active agent sessions before restarting. If run from within an active agent session, it will hang — it's waiting for YOU to finish. Workaround: use systemctl directly (forceful restart):
+```bash
+systemctl --user stop hermes-gateway; sleep 2; systemctl --user start hermes-gateway
+```
+This kills and restarts immediately. The active session will be interrupted (you'll see a system note about it), but the conversation history is preserved.

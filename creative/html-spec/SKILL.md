@@ -135,6 +135,13 @@ tr:last-child td { border-bottom: none; }
 ### Architecture diagrams (inline SVG)
 Use inline SVG for architecture diagrams. Keep them simple — boxes, arrows, labels. Use the CSS variable colors directly: `var(--clay)`, `var(--olive)`, `var(--oat)`, `var(--slate)`.
 
+**Distinguish REQUEST vs DATA flow.** HTTP request direction ≠ data direction. Architecture specs must show both:
+- REQUEST arrows (thin, gray): who initiates the HTTP call
+- DATA arrows (bold, colored): how data flows upstream→downstream and back to client
+- WRITE arrows (dashed): persistence to database/cache
+
+A diagram that only shows request arrows makes it look like data flows into services and never comes out. Complete the round-trip: client → server → upstream → server → client. See `architecture-diagram` skill for the full pattern.
+
 ```html
 <svg viewBox="0 0 800 400" style="width:100%; max-width:800px;">
   <!-- Box: User -->
@@ -217,10 +224,47 @@ function switchTab(evt, tabId) {
 | ADR (Decision Record) | Context, Decision, Alternatives (tabs), Consequences | Tabs for alternatives |
 | Tech Stack Spec | Overview, Stack table, Rationale per layer, Dependencies | None needed |
 
+## JSON → HTML via Contract Layer
+
+When generating HTML from an existing API JSON output (not writing a spec from scratch), use the Guido contract-layer stack: `schemas.py` (frozen dataclasses) → `adapter.py` (validate + transform) → `renderer.py` (dataclass → HTML). Full pattern in `references/json-to-html-contract-layer.md`.
+
+## ASCII Data Flow Diagrams
+
+When drawing data flow in `<pre><code>` blocks, use a 3-arrow convention to distinguish REQUEST from DATA from WRITE:
+
+```
+[REQ]   ──→  thin  = HTTP request (who initiates the call)
+[DATA]  ══►  bold  = data flow (upstream → downstream)
+[WRITE] - -→ dashed = database write
+```
+
+Key rule: arrows show **data flow direction**, not HTTP call direction. Mock/upstream services are data SOURCES — arrows point FROM upstream TO downstream. Even though Backend initiates the HTTP GET, the data flows Mock → Backend → Client.
+
+```
+RIGHT:  Mock ══[DATA]══► Backend ──[DATA]──► Client
+WRONG:  Backend ──[REQ]──► Mock   (shows HTTP direction, not data flow)
+```
+
+Show the complete round-trip: Client → Backend → Mock (REQUEST chain), then Mock → Backend → Client (DATA return chain). A diagram that only shows half the flow (data in, nothing out) looks like data is trapped in the system.
+
 ## Pitfalls
+
+- **ALWAYS use this skill FIRST for any HTML document.** Do not hand-write HTML from scratch. The user will notice missing sections, wrong styling, and raw markdown dumped into `<body>`. If you start with raw HTML and the user asks "有没有用到html的skill?", you've already lost time. Load this skill, use the exact skeleton structure (masthead + numbered sections + footer), and apply the CSS variable palette.
+- **Don't over-interact**: Not every spec needs tabs and collapsible. A clean static layout that reads like a magazine is often better.
+- **Keep SVG diagrams simple**: Boxes, arrows, labels. No gradients, no shadows, no 3D.
+- **One file, no external dependencies**: No CDN fonts, no JS frameworks, no CSS imports. Everything inline.
+- **Test in browser**: Always remind the user to open the `.html` in a browser.
+- **Print-friendly**: Use `@media print` to hide interactive elements and adjust colors for paper.
+- **Deployment accuracy (critical)**: When the spec describes a Docker/deployment architecture, be surgically precise about container boundaries. Never write "single Docker container" as a lazy shorthand.
+- **read_file content handling**: `read_file` returns content with line number prefixes (e.g. `"   123|code"`). Always strip these before embedding in HTML. Use `re.sub(r'^\s*\d+\|', '', content, flags=re.MULTILINE)` or read via terminal `cat` for clean output.
+- **Markdown → HTML conversion**: When converting existing markdown to HTML, don't dump raw MD into `<body>`. Parse sections manually or use the html-spec skeleton to rebuild proper sections with the skill's CSS classes, badges, and table styling.
 
 - **Don't over-interact**: Not every spec needs tabs and collapsible. A clean static layout that reads like a magazine is often better.
 - **Keep SVG diagrams simple**: Boxes, arrows, labels. No gradients, no shadows, no 3D. The information is what matters.
 - **One file, no external dependencies**: No CDN fonts, no JS frameworks, no CSS imports. Everything inline.
 - **Test in browser**: Always remind the user to open the `.html` in a browser. The agent can't see it — the user must.
 - **Print-friendly**: Use `@media print` to hide interactive elements and adjust colors for paper.
+- **Deployment accuracy (critical)**: When the spec describes a Docker/deployment architecture, be surgically precise about container boundaries. Never write "single Docker container" as a lazy shorthand for "Docker Compose single-node deployment." Docker best practice is one process per container — if PostgreSQL, the API server, and nginx are separate services, they belong in separate containers within the same docker-compose.yml. A spec that says "single container" when the design is multi-container will cause the user to lose confidence in the entire document. Always generate the actual deployable files (docker-compose.yml, Dockerfiles, nginx.conf, .env.example) alongside the prose spec and reference them by path. See `references/docker-compose-multi-container.md` for the canonical pattern.
+- **For data-dense reports (not prose specs)**, use the view-model rendering pattern: frozen dataclass schemas → adapter → self-contained HTML. Don't hand-write HTML for every data field. Pattern documented in `references/view-model-html-rendering.md`.
+- **NEVER inject raw Markdown into HTML body.** This session: Demi's EHDS-BioChem plan was generated by concatenating raw MD content into `<body>` — including `read_file`'s line-number prefixes (`   42|text`). The HTML rendered as one wall of unformatted text. Instead: (a) use `terminal cat` to read clean MD, (b) convert to HTML elements with Python regex, (c) apply html-spec CSS classes. See `references/markdown-to-html-conversion.md`.
+- **Deployment accuracy (critical)**: When the spec describes a Docker/deployment architecture, be surgically precise about container boundaries. Never write "single Docker container" as a lazy shorthand for "Docker Compose single-node deployment." Docker best practice is one process per container — if PostgreSQL, the API server, and nginx are separate services, they belong in separate containers within the same docker-compose.yml. A spec that says "single container" when the design is multi-container will cause the user to lose confidence in the entire document. Always generate the actual deployable files (docker-compose.yml, Dockerfiles, nginx.conf, .env.example) alongside the prose spec and reference them by path. See `references/docker-compose-multi-container.md` for the canonical pattern.

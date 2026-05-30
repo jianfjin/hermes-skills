@@ -1,0 +1,28 @@
+<!--
+  Reference: REQUEST vs DATA vs WRITE arrow pattern
+  Skill: architecture-diagram
+  Source: 2026-05-19 SCAILED WP4 session
+  Emperor caught wrong arrow direction (HTTP request ≠ data flow).
+  
+  Three visual types:
+    1. [REQ] gray thin   — HTTP request (who initiates the call)
+    2. [DATA] orange/cyan bold — data flow (upstream→processor, processor→client)
+    3. [WRITE] violet dashed — database/cache writes
+
+  Lines going RIGHT→LEFT with marker-end + orient="auto" will auto-flip the
+  arrowhead to point left, giving correct data-flow direction.
+-->
+
+<!-- Marker definitions -->
+<marker id="req" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+  <polygon points="0 0, 8 3, 0 6" fill="#64748b"/>
+</marker>
+<marker id="data-orange" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+  <polygon points="0 0, 10 4, 0 8" fill="#fb923c"/>
+</marker>
+<marker id="data-cyan" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+  <polygon points="0 0, 10 4, 0 8" fill="#22d3ee"/>
+</marker>
+<marker id="write" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+  <polygon points="0 0, 10 3.5, 0 7" fill="#a78bfa"/>
+</marker>

@@ -44,9 +44,17 @@ Only fall back to the ADC flow below if the file requires authentication.
    Use `google.auth.default()` to load credentials and `googleapiclient.discovery.build` to interact with the Drive API.
 
 ## Pitfalls & Lessons Learned
-- **Scope Errors**: Google Cloud often rejects requests that don't include `https://www.googleapis.com/auth/cloud-platform` alongside custom scopes.
+
+- **GCE Impersonation Failures**: On GCE VMs, ADC may be configured with `--impersonate-service-account` pointing to a regular @gmail.com account. This always fails with "Gaia id not found" because regular accounts are not service accounts. Fix: use the GCE metadata server directly (`curl http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token -H "Metadata-Flavor: Google"`) and ensure the VM's service account has Drive scope enabled at the GCP Console level (Compute Engine → VM → Edit → Access Scopes → Drive API).
+
+- **Scope Errors**: Google Cloud often rejects requests that don't include `https://www.googleapis.com/auth/cloud-platform` alongside custom scopes. When using `gcloud auth application-default login --scopes`, always include BOTH `cloud-platform` AND your target scope.
+
+- **OAuth on GCE VMs**: `gcloud auth login` and `gcloud auth application-default login` with `--no-launch-browser` generate URLs that may fail with `redirect_uri_mismatch` due to GCE's restricted OAuth client configuration. The preferred approach on GCE is to use the service account with proper scopes, not user OAuth.
+
 - **Impersonation Failures**: Impersonating a standard @gmail.com account via `--impersonate-service-account` typically fails with "Gaia id not found" because standard accounts are not service accounts. Standard accounts should use the `application-default login` flow instead.
+
 - **Library Installation**: In restricted environments, avoid `pip install` on system Python. Use `--break-system-packages` if necessary or use a virtual environment.
+
 - **Sandbox Isolation**: Be aware that some execution sandboxes may not share the same site-packages directory as the main terminal; verify imports using `python3 -c "import ..."` before running complex scripts.
 
 ## Verification

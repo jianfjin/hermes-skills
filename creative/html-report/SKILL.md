@@ -253,6 +253,8 @@ Same CSS variables as `html-spec`. Additional report-specific styles:
 
 ## Pitfalls
 
+- **Data-to-HTML pipeline pattern**: When converting API JSON to self-contained HTML reports, use the view-model contract layer: JSON → adapter (validates, resolves cross-refs) → frozen @dataclass → renderer (string formatting). Templates must never receive raw dicts. Full pattern + schema examples in `references/data-to-html-pipeline.md`.
+
 - **Metric cards need context**: "67% complete" means nothing without "target was 70%". Add trend arrows (↑↓→).
 - **Finding cards need severity**: Every finding must be tagged. Reader should know in 2 seconds what to worry about.
 - **Consensus must include dissent**: If 8/9 agree, show the 1 dissent. It's often the most valuable perspective.

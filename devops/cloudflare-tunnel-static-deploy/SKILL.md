@@ -1,47 +1,62 @@
 ---
 name: cloudflare-tunnel-static-deploy
-description: Deploy a static HTML dashboard from a GCP VM to a public domain via Cloudflare Tunnel without root/sudo requirements.
+description: Expose any local HTTP service (static site, webhook API, dashboard) from a cloud VM to a public URL via Cloudflare Tunnel, no firewall changes needed.
 ---
 
-# Cloudflare Tunnel Static Site Deployment via GCP VM
+# Cloudflare Tunnel: Expose Local HTTP Services from Cloud VMs
 
-This skill outlines the workflow for deploying a static HTML dashboard from a Google Cloud Platform (GCP) VM to a public domain using a Cloudflare Tunnel.
+Use Cloudflare Tunnel to expose any local HTTP port (static sites, Hermes webhook API, dashboards, REST endpoints) from a GCP/AWS/Azure VM to a public HTTPS URL. Bypasses cloud firewall restrictions without opening ports.
 
 ## Trigger Conditions
-- Need to expose a local port (e.g., 8080) on a GCP VM to a public URL with SSL.
-- Avoid opening GCP firewall ports manually.
-- Requirement for a persistent domain (e.g., audit.edmf.nl).
+- Need to expose a local port (e.g., 8080, 8644) on a cloud VM to a public URL with SSL.
+- Cloud firewall (GCP, AWS SG) blocks the port — don't want to open it manually.
+- Quick ephemeral tunnel for testing, or persistent named tunnel for production.
+- Works for: static HTML, Hermes webhook gateway, Python http.server, any HTTP service.
 
 ## Implementation Steps
 
-1. **Prepare Static Content**
-   - Create a dedicated web root: `mkdir -p ~/web_root`
-   - Place the HTML file as `index.html` in the root.
+### Ephemeral Tunnel (Quick, No Account Needed)
 
-2. **Start Local HTTP Server**
-   - Use Python's built-in server for lightweight hosting:
-     `nohup python3 -m http.server 8080 --directory ~/web_root > server.log 2>&1 &`
+Best for one-off testing. URL changes on restart.
 
-3. **Install Cloudflared (Binary Mode)**
-   - To avoid `sudo` permission issues in restricted VM environments:
-     - Download binary: `curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared`
-     - Make executable: `chmod +x cloudflared`
+```bash
+# Run in background (Hermes: use terminal(background=true))
+cloudflared tunnel --url http://localhost:<PORT> --no-autoupdate 2>&1 | tee /tmp/cf_tunnel.log
+```
 
-4. **Establish Tunnel**
-   - **Option A (Ephemeral/Temp):** `nohup ./cloudflared tunnel --url http://localhost:8080 > tunnel.log 2>&1 &`
-   - **Option B (Permanent/Managed):** Use the tunnel token from Cloudflare Dashboard:
-     `nohup ./cloudflared tunnel run --token <YOUR_TOKEN> > tunnel.log 2>&1 &`
+Extract the `trycloudflare.com` URL from the log output. The tunnel auto-provisions SSL.
 
-5. **Configuration on Cloudflare Dashboard**
-   - Go to Tunnels $\rightarrow$ [Your Tunnel] $\rightarrow$ Public Hostname.
-   - Map `your-domain.com` to `http://localhost:8080`.
+### Persistent Named Tunnel (Production)
+
+For a stable domain that survives restarts (e.g., `webhook.your-domain.com`).
+
+1. **Install cloudflared** — binary mode avoids sudo:
+   ```bash
+   curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o ~/bin/cloudflared
+   chmod +x ~/bin/cloudflared
+   ```
+
+2. **Authenticate**: `cloudflared tunnel login` (opens browser — run on local machine or use headless auth)
+
+3. **Create tunnel**: `cloudflared tunnel create <name>`
+
+4. **Configure** `~/.cloudflared/config.yml`:
+   ```yaml
+   tunnel: <tunnel-id>
+   credentials-file: /home/user/.cloudflared/<tunnel-id>.json
+   ingress:
+     - hostname: webhook.your-domain.com
+       service: http://localhost:8644
+     - service: http_status:404
+   ```
+
+5. **DNS**: In Cloudflare dashboard, add CNAME `<tunnel-id>.cfargotunnel.com` for your domain.
+
+6. **Run**: `cloudflared tunnel run <name>` (or install as systemd service).
 
 ## Pitfalls & Troubleshooting
-- **502 Bad Gateway**: Usually means the tunnel is connected but the local server on the target port is not running or is crashing. Check `server.log`.
-- **Sudo Permission Errors**: Avoid `.deb` packages in restricted environments; always use the direct binary download.
-- **Port Collision**: Use `pkill -f "python3 -m http.server"` and `pkill -f "cloudflared"` before restarting.
-- **Zombies**: In some VM environments, processes may hang; check for active listeners via `netstat -tulpn`.
-
-## Verification
-- Check if the process is listening: `curl -I http://localhost:8080`
-- Access the public URL and check for SSL certification and page load.
+- **502 Bad Gateway**: Tunnel is connected but the local service on the target port is not running. Check `curl localhost:<PORT>/health`.
+- **Sudo Permission Errors**: Avoid `.deb` packages in restricted VM environments; use the direct binary download.
+- **Port Collision**: Use `pkill -f "cloudflared"` before restarting ephemeral tunnels.
+- **Ephemeral URL changes on restart**: The `trycloudflare.com` subdomain is random each time. For stable URLs, use a named tunnel with your own domain.
+- **No output in background mode**: Cloudflared logs to stderr. Use `2>&1 | tee` to capture, or check the timestamped trial URL in the first ~6 lines of stderr.
